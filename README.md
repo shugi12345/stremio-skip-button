@@ -1,14 +1,14 @@
 # Stremio Skip Intro Plugin
 
-This repository contains a simple JavaScript plugin for **Stremio Enhanced**. The script injects a "Set Intro" button into the Stremio web UI that allows a user to store intro start and end timestamps for a given video (keyed by IMDb ID). When those timestamps are available, a "Skip Intro" button appears while the video is playing, allowing the viewer to jump past the intro segment.
+This repository provides a small plugin script for **Stremio Enhanced**. It lets you store per-movie or per-episode intro times and automatically offers a skip button while watching.
 
 ## Usage
 
 1. Install the **Stremio Enhanced** browser extension.
-2. Add the script `skip-intro.js` as a custom plugin in the extension settings.
-3. Open Stremio in your browser. A "Set Intro" button will appear in the bottom-right corner of the interface.
-4. While a video is selected, click "Set Intro" and enter the start and end times for the intro segment in seconds.
-5. The times are saved in `localStorage` under a key that includes the video's IMDb ID.
-6. When the same video is played again, a "Skip Intro" button will appear when the playback reaches the intro segment.
+2. Add `skip-intro.js` as a custom plugin in the extension settings.
+3. Start playing a video. A new button will appear in the player's control bar.
+4. Click the button to enter the intro start and end times (in seconds). You can use the video's current time for convenience.
+5. The times are saved locally in `localStorage` using the IMDb ID of the title.
+6. When you watch the same title again, a "Skip Intro" popup shows up once the intro starts. If you don't interact, it auto-skips after five seconds.
 
-All data is stored locally in the browser. No external server is used.
+All data is stored locally in the browser.
