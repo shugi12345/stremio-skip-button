@@ -1,7 +1,7 @@
 /**
  * @name SkipIntro
  * @description Skip‐range editor synced to your server + smart skip button
- * @version 1.0.4 (single-fetch + post-save re-fetch)
+ * @version 1.1.0 UI improvements
  */
 
 (function () {
