@@ -4,10 +4,13 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 const app = express();
-// Configuration
-const CACHE_DURATION = 300; // seconds for Cache-Control header
 
-// Middleware
+// --- Configuration ---
+const PORT = process.env.PORT || 3000;
+const MONGO_URI =
+  process.env.MONGO_URI || "mongodb://localhost:27017/skiprange";
+
+// --- Middleware ---
 app.use(cors());
 app.use(express.json()); // parse application/json
 
@@ -24,22 +27,24 @@ const SkipRange = mongoose.model("SkipRange", skipRangeSchema);
 
 // --- Routes ---
 
-// Create or update a skip range
+// POST /ranges - create or update skip range
 app.post("/ranges", async (req, res) => {
   const { episodeId, start, end } = req.body;
   if (!episodeId || typeof start !== "number" || typeof end !== "number") {
-    console.log(`[Server] Invalid POST body for episode ${episodeId}`);
+    console.log(
+      `[Server] Invalid POST body: episodeId=${episodeId}, start=${start}, end=${end}`
+    );
     return res
       .status(400)
       .json({ error: "episodeId, start and end are required" });
   }
+
   try {
     const range = await SkipRange.findOneAndUpdate(
       { episodeId },
       { start, end },
       { upsert: true, new: true, runValidators: true }
     );
-    res.set("Cache-Control", `public, max-age=${CACHE_DURATION}`);
     console.log(
       `[Server] Saved range for ${episodeId}: start=${start}, end=${end}`
     );
@@ -50,18 +55,19 @@ app.post("/ranges", async (req, res) => {
   }
 });
 
-// Get a skip range by episode ID
-// 200 with JSON if found, 204 No Content if not
+// GET /ranges/:episodeId - return skip range or 204 if not found
 app.get("/ranges/:episodeId", async (req, res) => {
   const { episodeId } = req.params;
-  res.set("Cache-Control", `public, max-age=${CACHE_DURATION}`);
+  res.set("Cache-Control", "no-store");
   try {
     const range = await SkipRange.findOne({ episodeId });
     if (!range) {
       console.log(`[Server] No range for ${episodeId}, returning 204`);
       return res.sendStatus(204);
     }
-    console.log(`[Server] Found range for ${episodeId}`);
+    console.log(
+      `[Server] Found range for ${episodeId}: start=${range.start}, end=${range.end}`
+    );
     return res.status(200).json(range);
   } catch (err) {
     console.error("[Server] Database error on GET /ranges:", err);
@@ -69,10 +75,10 @@ app.get("/ranges/:episodeId", async (req, res) => {
   }
 });
 
-// HEAD to check existence (200 if found, 204 if not)
+// HEAD /ranges/:episodeId - check if exists (200 or 204)
 app.head("/ranges/:episodeId", async (req, res) => {
   const { episodeId } = req.params;
-  res.set("Cache-Control", `public, max-age=${CACHE_DURATION}`);
+  res.set("Cache-Control", "no-store");
   try {
     const exists = await SkipRange.exists({ episodeId });
     const status = exists ? 200 : 204;
@@ -84,12 +90,12 @@ app.head("/ranges/:episodeId", async (req, res) => {
   }
 });
 
-// Delete a skip range
+// DELETE /ranges/:episodeId - remove a range
 app.delete("/ranges/:episodeId", async (req, res) => {
   const { episodeId } = req.params;
+  res.set("Cache-Control", "no-store");
   try {
     const result = await SkipRange.deleteOne({ episodeId });
-    res.set("Cache-Control", `public, max-age=${CACHE_DURATION}`);
     if (result.deletedCount === 0) {
       console.log(`[Server] No range to delete for ${episodeId}`);
       return res.status(404).json({ error: "Not found" });
@@ -103,10 +109,6 @@ app.delete("/ranges/:episodeId", async (req, res) => {
 });
 
 // --- Start server ---
-const PORT = process.env.PORT || 3000;
-const MONGO_URI =
-  process.env.MONGO_URI || "mongodb://localhost:27017/skiprange";
-
 mongoose
   .connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {

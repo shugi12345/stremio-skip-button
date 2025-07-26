@@ -73,19 +73,30 @@
   async function fetchRangeWithRetry(epId) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        console.log(`[SkipRange] HEAD /ranges/${epId} (attempt ${attempt})`);
+        console.log(
+          `[SkipRange] Fetching /ranges/${epId} (attempt ${attempt})`
+        );
         const head = await fetch(
           `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`,
           { method: "HEAD" }
         );
 
         if (head.status === 404) return null;
-        if (head.status === 204) return null;
+        if (head.status === 204) {
+          console.log(`[SkipRange] No skip data (204) for episode ${epId}`);
+          return null;
+        }
         if (head.status === 200) {
           const getRes = await fetch(
             `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`
           );
-          if (getRes.ok) return await getRes.json();
+          if (getRes.ok) {
+            const json = await getRes.json();
+            console.log(
+              `[SkipRange] Loaded range from server: start=${json.start}s, end=${json.end}s`
+            );
+            return json;
+          }
           return null;
         }
         return null;
@@ -136,20 +147,47 @@
       alignItems: "center",
     });
 
+    // === Get saved unsaved inputs ===
+    const epIdKey = `skiprange-last-${currentEpisodeId}`;
+    const savedDraft = JSON.parse(localStorage.getItem(epIdKey) || "{}");
+
+    function formatTime(seconds) {
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      return `${m.toString().padStart(2, "0")}:${s
+        .toString()
+        .padStart(2, "0")}`;
+    }
+
     const startLabel = createLabeledInput(
       "sr-start",
       "Start: ",
-      existing?.start,
+      savedDraft.start ||
+        (existing?.start != null ? formatTime(existing.start) : ""),
       "00:00",
       "15px"
     );
+
     const endLabel = createLabeledInput(
       "sr-end",
       "End: ",
-      existing?.end,
+      savedDraft.end || (existing?.end != null ? formatTime(existing.end) : ""),
       "00:30",
       "22px"
     );
+
+    // Save input on change to localStorage
+    const saveDraft = () => {
+      localStorage.setItem(
+        epIdKey,
+        JSON.stringify({
+          start: document.getElementById("sr-start").value,
+          end: document.getElementById("sr-end").value,
+        })
+      );
+    };
+    startLabel.querySelector("input").addEventListener("input", saveDraft);
+    endLabel.querySelector("input").addEventListener("input", saveDraft);
 
     const saveBtn = document.createElement("button");
     saveBtn.id = "sr-save";
@@ -187,6 +225,7 @@
           body: JSON.stringify({ episodeId: epId, start, end }),
         });
         if (!res.ok) throw new Error(res.status);
+        localStorage.removeItem(epIdKey); // Clear draft after save
         setTimeout(() => loadRangeForCurrentEpisode(), REFETCH_DELAY);
       } catch (err) {
         console.error("[SkipRange] Failed to save:", err);
@@ -262,7 +301,7 @@
     b.textContent = "Skip Intro";
 
     const icon = document.createElement("img");
-    icon.src = "https://www.svgrepo.com/sho/471906/skip-forward.svg";
+    icon.src = "https://www.svgrepo.com/show/471906/skip-forward.svg";
     icon.alt = "Skip icon";
     icon.width = 24;
     icon.height = 24;
