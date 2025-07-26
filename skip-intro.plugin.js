@@ -1,7 +1,7 @@
 /**
  * @name SkipIntro
  * @description Skip‐range editor synced to your server + smart skip button
- * @version 1.1.0 UI improvements
+ * @version 1.1.1 DOM refactor
  */
 
 (function () {
@@ -12,8 +12,8 @@
   const POPUP_ID = "skiprange-editor";
   const ACTIVE_BTN_ID = "skiprange-active-btn";
   const MAX_RETRIES = 3;
-  const RETRY_DELAY = 500; // ms
-  const REFETCH_DELAY = 2000; // ms after saving
+  const RETRY_DELAY = 500;
+  const REFETCH_DELAY = 2000;
 
   // ==== Page-context evaluator ====
   function _eval(js) {
@@ -47,7 +47,6 @@
     });
   }
 
-  // ==== Player-state helpers ====
   async function getPlayerState() {
     let state = null;
     while (!state?.metaItem?.content) {
@@ -57,12 +56,12 @@
     }
     return { seriesInfo: state.seriesInfo, meta: state.metaItem.content };
   }
+
   async function getEpisodeId() {
     const { seriesInfo, meta } = await getPlayerState();
     return `${meta.id}:${seriesInfo?.episode || 0}`;
   }
 
-  // ==== Time parsing ====
   function parseTime(str) {
     if (str.includes(":")) {
       const [m, s] = str.split(":").map(Number);
@@ -71,7 +70,6 @@
     return Number(str) || 0;
   }
 
-  // ==== HEAD+GET with retry & status logic ====
   async function fetchRangeWithRetry(epId) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -81,96 +79,107 @@
           { method: "HEAD" }
         );
 
-        if (head.status === 404) {
-          console.error("[SkipRange] API missing (404). Aborting.");
-          return null;
-        }
-        if (head.status === 204) {
-          console.log("[SkipRange] No skip data (204).");
-          return null;
-        }
+        if (head.status === 404) return null;
+        if (head.status === 204) return null;
         if (head.status === 200) {
-          console.log("[SkipRange] Data exists (200) – fetching JSON…");
           const getRes = await fetch(
             `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`
           );
-          if (getRes.ok) {
-            const data = await getRes.json();
-            console.log(
-              `[SkipRange] Got range: start=${data.start}, end=${data.end}`
-            );
-            return data;
-          }
-          console.error(`[SkipRange] GET failed: ${getRes.status}`);
+          if (getRes.ok) return await getRes.json();
           return null;
         }
-        console.warn(`[SkipRange] Unexpected HEAD status: ${head.status}`);
         return null;
-      } catch (err) {
-        console.error(`[SkipRange] Network error (attempt ${attempt}):`, err);
-        if (attempt < MAX_RETRIES) {
-          console.log(`[SkipRange] Retrying in ${RETRY_DELAY}ms…`);
+      } catch {
+        if (attempt < MAX_RETRIES)
           await new Promise((r) => setTimeout(r, RETRY_DELAY));
-        } else {
-          console.error("[SkipRange] All retry attempts failed.");
-          return null;
-        }
+        else return null;
       }
     }
     return null;
   }
 
-  // ==== Popup editor (unchanged) ====
+  function createLabeledInput(id, labelText, value, placeholder, marginLeft) {
+    const label = document.createElement("label");
+    label.textContent = labelText;
+
+    const input = document.createElement("input");
+    input.id = id;
+    input.value = value || "";
+    input.placeholder = placeholder;
+    Object.assign(input.style, {
+      width: "50px",
+      color: "white",
+      marginLeft,
+    });
+
+    label.appendChild(input);
+    return label;
+  }
+
   function createEditor(bar, existing) {
     if (document.getElementById(POPUP_ID)) return;
-    console.log("[SkipRange] Opening editor popup");
+
     const pop = document.createElement("div");
     pop.id = POPUP_ID;
     Object.assign(pop.style, {
+      width: "150px",
       position: "absolute",
-      bottom: "50px",
-      right: "0",
-      background: "#222",
+      bottom: "120px",
+      background: "#0f0d20",
       color: "#fff",
-      padding: "8px",
-      border: "1px solid #666",
+      padding: "10px",
       borderRadius: "6px",
       zIndex: 9999,
-      fontSize: "13px",
+      fontSize: "16px",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
     });
-    pop.innerHTML = `
-      <label>Start: <input id="sr-start" style="width:50px" value="${
-        existing?.start || ""
-      }" placeholder="0"></label><br>
-      <label>End:   <input id="sr-end"   style="width:50px" value="${
-        existing?.end || ""
-      }"   placeholder="10"></label><br>
-      <button id="sr-save" style="margin-top:6px;padding:4px 8px">Save</button>`;
-    bar.appendChild(pop);
 
-    function closeOutside(e) {
-      if (!pop.contains(e.target) && e.target.id !== INLINE_BTN_ID) {
-        pop.remove();
-        document.removeEventListener("click", closeOutside);
-        console.log("[SkipRange] Editor popup closed");
-      }
-    }
-    document.addEventListener("click", closeOutside);
+    const startLabel = createLabeledInput(
+      "sr-start",
+      "Start: ",
+      existing?.start,
+      "00:00",
+      "15px"
+    );
+    const endLabel = createLabeledInput(
+      "sr-end",
+      "End: ",
+      existing?.end,
+      "00:30",
+      "22px"
+    );
 
-    document.getElementById("sr-save").onclick = async (e) => {
-      e.stopPropagation();
+    const saveBtn = document.createElement("button");
+    saveBtn.id = "sr-save";
+    saveBtn.textContent = "Save";
+    Object.assign(saveBtn.style, {
+      marginTop: "6px",
+      padding: "10px 20px",
+      color: "white",
+      cursor: "pointer",
+      backgroundColor: "#0f0d20",
+      border: "none",
+      borderRadius: "6px",
+      transition: "background-color .3s",
+    });
+    saveBtn.addEventListener(
+      "mouseover",
+      () => (saveBtn.style.backgroundColor = "#1b192b")
+    );
+    saveBtn.addEventListener(
+      "mouseout",
+      () => (saveBtn.style.backgroundColor = "#0f0d20")
+    );
+
+    saveBtn.onclick = async (e) => {
       e.preventDefault();
       const start = parseTime(document.getElementById("sr-start").value);
       const end = parseTime(document.getElementById("sr-end").value);
-      if (!(end > start)) {
-        alert("End must be > Start");
-        return;
-      }
+      if (!(end > start)) return alert("End must be > Start");
 
       const epId = await getEpisodeId();
-      console.log(
-        `[SkipRange] Saving range for ${epId}: start=${start}, end=${end}`
-      );
       try {
         const res = await fetch(`${SERVER_URL}/ranges`, {
           method: "POST",
@@ -178,8 +187,6 @@
           body: JSON.stringify({ episodeId: epId, start, end }),
         });
         if (!res.ok) throw new Error(res.status);
-        console.log("[SkipRange] Range saved 👍");
-        // After save, re-fetch in a moment so skip UI appears immediately
         setTimeout(() => loadRangeForCurrentEpisode(), REFETCH_DELAY);
       } catch (err) {
         console.error("[SkipRange] Failed to save:", err);
@@ -187,29 +194,46 @@
       pop.remove();
       document.removeEventListener("click", closeOutside);
     };
+
+    function closeOutside(e) {
+      if (!pop.contains(e.target) && e.target.id !== INLINE_BTN_ID) {
+        pop.remove();
+        document.removeEventListener("click", closeOutside);
+      }
+    }
+
+    document.addEventListener("click", closeOutside);
+    pop.append(startLabel, endLabel, saveBtn);
+    bar.appendChild(pop);
   }
 
-  // ==== Setup button (unchanged) ====
   function addSetupButton(bar) {
     if (document.getElementById(INLINE_BTN_ID)) return;
+
     const btn = document.createElement("button");
     btn.id = INLINE_BTN_ID;
-    btn.textContent = "⏩ Setup";
+
+    const icon = document.createElement("img");
+    icon.src = "https://www.svgrepo.com/show/532105/clock-lines.svg";
+    icon.width = 30;
+    icon.height = 30;
+    icon.alt = "Clock icon";
+    Object.assign(icon.style, {
+      verticalAlign: "middle",
+      filter: "brightness(0) invert(1)",
+    });
+
     Object.assign(btn.style, {
-      marginLeft: "8px",
-      padding: "6px 8px",
-      background: "#444",
-      color: "#fff",
+      padding: "6px",
       border: "none",
       borderRadius: "4px",
       cursor: "pointer",
-      fontSize: "13px",
     });
+
+    btn.appendChild(icon);
     btn.onclick = async (e) => {
-      e.stopPropagation();
       e.preventDefault();
       const epId = await getEpisodeId();
-      console.log(`[SkipRange] Setup clicked for ${epId}`);
       let existing = null;
       try {
         const head = await fetch(
@@ -227,39 +251,61 @@
       }
       createEditor(bar, existing);
     };
-    bar.appendChild(btn);
+    bar.prepend(btn);
   }
 
-  // ==== Skip button UI ====
   function showActiveSkip(wrap, end) {
     if (document.getElementById(ACTIVE_BTN_ID)) return;
+
     const b = document.createElement("button");
     b.id = ACTIVE_BTN_ID;
-    b.textContent = "⏩ Skip";
+    b.textContent = "Skip Intro";
+
+    const icon = document.createElement("img");
+    icon.src = "https://www.svgrepo.com/sho/471906/skip-forward.svg";
+    icon.alt = "Skip icon";
+    icon.width = 24;
+    icon.height = 24;
+    Object.assign(icon.style, {
+      filter: "brightness(0) invert(1)",
+    });
+
     Object.assign(b.style, {
       position: "absolute",
-      bottom: "100px",
-      right: "20px",
+      bottom: "130px",
+      right: "10vh",
       padding: "8px 12px",
-      background: "#27ae60",
+      background: "#0f0d20",
       color: "#fff",
       border: "none",
-      borderRadius: "4px",
+      borderRadius: "6px",
       cursor: "pointer",
-      fontSize: "14px",
+      fontSize: "24px",
       zIndex: 1000,
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "16px",
     });
+
+    b.prepend(icon);
+
+    b.addEventListener("mouseover", () => {
+      b.style.backgroundColor = "#1b192b";
+    });
+    b.addEventListener("mouseout", () => {
+      b.style.backgroundColor = "#0f0d20";
+    });
+
     b.onclick = (e) => {
-      e.stopPropagation();
       e.preventDefault();
       document.querySelector("video").currentTime = end;
       b.remove();
-      console.log("[SkipRange] Skip clicked → jumped to", end);
     };
+
     wrap.appendChild(b);
   }
 
-  // ==== One-fetch-per-episode + post-save re-fetch ====
   let currentEpisodeId = null;
   let currentRange = null;
   let lastVideo = null;
@@ -269,24 +315,22 @@
     if (!currentEpisodeId) return;
     const data = await fetchRangeWithRetry(currentEpisodeId);
     currentRange = data;
-    if (data && lastVideo) {
-      attachTimeUpdate();
-    }
+    if (data && lastVideo) attachTimeUpdate();
   }
 
   function attachTimeUpdate() {
-    if (onTimeUpdate && lastVideo) {
+    if (onTimeUpdate && lastVideo)
       lastVideo.removeEventListener("timeupdate", onTimeUpdate);
-    }
+
     onTimeUpdate = () => {
       if (
         lastVideo.currentTime >= currentRange.start &&
         lastVideo.currentTime < currentRange.end
       ) {
-        console.log("[SkipRange] Within skip window→ showing Skip");
         showActiveSkip(lastVideo.parentElement, currentRange.end);
       }
     };
+
     lastVideo.addEventListener("timeupdate", onTimeUpdate);
   }
 
@@ -295,9 +339,6 @@
     if (epId !== currentEpisodeId) {
       currentEpisodeId = epId;
       currentRange = null;
-      console.log(
-        `[SkipRange] New episode ${epId} started—fetching range once`
-      );
       await loadRangeForCurrentEpisode();
     }
   }
@@ -305,16 +346,17 @@
   function attachPlayListener() {
     const video = document.querySelector("video");
     if (!video || video === lastVideo) return;
+
     if (lastVideo) {
       lastVideo.removeEventListener("play", onPlayOnceCheck);
       if (onTimeUpdate)
         lastVideo.removeEventListener("timeupdate", onTimeUpdate);
     }
+
     video.addEventListener("play", onPlayOnceCheck);
     lastVideo = video;
   }
 
-  // ==== Observer to wire everything up ====
   const obs = new MutationObserver(() => {
     const bar = document.querySelector(
       ".control-bar-buttons-menu-container-M6L0_"
