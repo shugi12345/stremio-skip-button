@@ -89,29 +89,16 @@
         console.log(
           `[SkipIntro] Fetching /ranges/${epId} (attempt ${attempt})`
         );
-        const headRes = await fetch(
-          `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`,
-          { method: "HEAD" }
+        const res = await fetch(
+          `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`
         );
-
-        if (headRes.status === 404 || headRes.status === 204) {
-          console.log(
-            `[SkipIntro] No skip data for episode ${epId} (${headRes.status})`
-          );
-          return null;
-        }
-
-        if (headRes.status === 200) {
-          const getRes = await fetch(
-            `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`
-          );
-          if (!getRes.ok) return null;
-          const data = await getRes.json();
-          console.log(
-            `[SkipIntro] Loaded range: ${data.start}s → ${data.end}s`
-          );
-          return data;
-        }
+        if (res.status === 204 || res.status === 404) return null;
+        if (!res.ok) throw new Error(res.status);
+        const json = await res.json();
+        console.log(
+          `[SkipIntro] Loaded range from server: start=${json.start}s, end=${json.end}s`
+        );
+        return json;
       } catch (err) {
         if (attempt === MAX_RETRIES)
           console.error("[SkipIntro] Failed to fetch range:", err);
@@ -219,12 +206,28 @@
       }
 
       try {
-        const epId = await getEpisodeId();
+        const { meta, seriesInfo } = await getPlayerState();
+        const epId = `${meta.id}:${seriesInfo?.episode || 0}`;
+        const title = meta?.name || "Unknown Title";
+
+        let readableTitle = title;
+        if (seriesInfo?.season != null && seriesInfo?.episode != null) {
+          const season = String(seriesInfo.season).padStart(2, "0");
+          const episode = String(seriesInfo.episode).padStart(2, "0");
+          readableTitle = `${title} S${season}E${episode}`;
+        }
+
         const res = await fetch(`${SERVER_URL}/ranges`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ episodeId: epId, start, end }),
+          body: JSON.stringify({
+            episodeId: epId,
+            start,
+            end,
+            title: readableTitle,
+          }),
         });
+
         if (!res.ok) throw new Error(res.status);
 
         localStorage.removeItem(storageKey);
@@ -362,9 +365,12 @@
     lastVideo?.addEventListener("timeupdate", onTimeUpdate);
   }
 
+  let lastCheckedEpisodeId = null;
+
   async function onPlay() {
     const epId = await getEpisodeId();
-    if (epId !== currentEpisodeId) {
+    if (epId !== currentEpisodeId || epId !== lastCheckedEpisodeId) {
+      lastCheckedEpisodeId = epId;
       currentEpisodeId = epId;
       currentRange = await fetchRangeWithRetry(epId);
       if (lastVideo) attachTimeUpdate();

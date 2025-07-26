@@ -20,6 +20,7 @@ const skipRangeSchema = new mongoose.Schema(
     episodeId: { type: String, required: true, unique: true },
     start: { type: Number, required: true },
     end: { type: Number, required: true },
+    title: { type: String }, // NEW FIELD
   },
   { timestamps: true }
 );
@@ -29,7 +30,7 @@ const SkipRange = mongoose.model("SkipRange", skipRangeSchema);
 
 // POST /ranges - create or update skip range
 app.post("/ranges", async (req, res) => {
-  const { episodeId, start, end } = req.body;
+  const { episodeId, start, end, title } = req.body;
   if (!episodeId || typeof start !== "number" || typeof end !== "number") {
     console.log(
       `[Server] Invalid POST body: episodeId=${episodeId}, start=${start}, end=${end}`
@@ -42,11 +43,11 @@ app.post("/ranges", async (req, res) => {
   try {
     const range = await SkipRange.findOneAndUpdate(
       { episodeId },
-      { start, end },
+      { start, end, title },
       { upsert: true, new: true, runValidators: true }
     );
     console.log(
-      `[Server] Saved range for ${episodeId}: start=${start}, end=${end}`
+      `[Server] Saved range for ${episodeId} (${title}): start=${start}, end=${end}`
     );
     return res.json(range);
   } catch (err) {
@@ -66,7 +67,7 @@ app.get("/ranges/:episodeId", async (req, res) => {
       return res.sendStatus(204);
     }
     console.log(
-      `[Server] Found range for ${episodeId}: start=${range.start}, end=${range.end}`
+      `[Server] Fetched range for ${episodeId} (${range.title}): start=${range.start}, end=${range.end}`
     );
     return res.status(200).json(range);
   } catch (err) {
