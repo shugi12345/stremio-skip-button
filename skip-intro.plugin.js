@@ -1,21 +1,30 @@
 /**
  * @name SkipIntro
- * @description Skip‐range editor synced to your server + smart skip button
- * @version 1.1.1 DOM refactor
+ * @description Skip Intro for shows and movies in Stremio Enhanced
+ * @version 1.0.0
+ * @author shugi12345
  */
 
 (function () {
   "use strict";
 
-  const SERVER_URL = "http://localhost:3000";
+  const SERVER_URL = "https://stremio-skip-button.onrender.com";
   const INLINE_BTN_ID = "skiprange-setup-btn";
   const POPUP_ID = "skiprange-editor";
   const ACTIVE_BTN_ID = "skiprange-active-btn";
   const MAX_RETRIES = 3;
-  const RETRY_DELAY = 500;
-  const REFETCH_DELAY = 2000;
+  const RETRY_DELAY = 2000;
+  const STORAGE_PREFIX = "skipintro:";
 
-  // ==== Page-context evaluator ====
+  let currentEpisodeId = null;
+  let currentRange = null;
+  let lastVideo = null;
+  let onTimeUpdate = null;
+  let popupOpen = false;
+  const rangeCache = {};
+
+  console.info(`[SkipIntro] v1.1.0 loaded`);
+
   function _eval(js) {
     return new Promise((resolve) => {
       const event = "stremio-enhanced";
@@ -28,21 +37,18 @@
         },
         { once: true }
       );
-      script.appendChild(
-        document.createTextNode(`
+
+      script.textContent = `
         (async () => {
           try {
             const res = ${js};
-            if (res instanceof Promise)
-              res.then(r => window.dispatchEvent(new CustomEvent('${event}', { detail: r })));
-            else
-              window.dispatchEvent(new CustomEvent('${event}', { detail: res }));
+            if (res instanceof Promise) res.then(r => window.dispatchEvent(new CustomEvent('${event}', { detail: r })));
+            else window.dispatchEvent(new CustomEvent('${event}', { detail: res }));
           } catch (err) {
-            console.error('[SkipRange] _eval error:', err);
+            console.error('[SkipIntro] _eval error:', err);
             window.dispatchEvent(new CustomEvent('${event}', { detail: null }));
           }
-        })();`)
-      );
+        })();`;
       document.head.appendChild(script);
     });
   }
@@ -63,47 +69,53 @@
   }
 
   function parseTime(str) {
-    if (str.includes(":")) {
-      const [m, s] = str.split(":").map(Number);
-      return (m || 0) * 60 + (s || 0);
-    }
-    return Number(str) || 0;
+    const [min, sec] = str.split(":").map(Number);
+    return (min || 0) * 60 + (sec || 0);
+  }
+
+  function formatTime(seconds) {
+    const m = Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = Math.floor(seconds % 60)
+      .toString()
+      .padStart(2, "0");
+    return `${m}:${s}`;
   }
 
   async function fetchRangeWithRetry(epId) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         console.log(
-          `[SkipRange] Fetching /ranges/${epId} (attempt ${attempt})`
+          `[SkipIntro] Fetching /ranges/${epId} (attempt ${attempt})`
         );
-        const head = await fetch(
+        const headRes = await fetch(
           `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`,
           { method: "HEAD" }
         );
 
-        if (head.status === 404) return null;
-        if (head.status === 204) {
-          console.log(`[SkipRange] No skip data (204) for episode ${epId}`);
+        if (headRes.status === 404 || headRes.status === 204) {
+          console.log(
+            `[SkipIntro] No skip data for episode ${epId} (${headRes.status})`
+          );
           return null;
         }
-        if (head.status === 200) {
+
+        if (headRes.status === 200) {
           const getRes = await fetch(
             `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`
           );
-          if (getRes.ok) {
-            const json = await getRes.json();
-            console.log(
-              `[SkipRange] Loaded range from server: start=${json.start}s, end=${json.end}s`
-            );
-            return json;
-          }
-          return null;
+          if (!getRes.ok) return null;
+          const data = await getRes.json();
+          console.log(
+            `[SkipIntro] Loaded range: ${data.start}s → ${data.end}s`
+          );
+          return data;
         }
-        return null;
-      } catch {
-        if (attempt < MAX_RETRIES)
-          await new Promise((r) => setTimeout(r, RETRY_DELAY));
-        else return null;
+      } catch (err) {
+        if (attempt === MAX_RETRIES)
+          console.error("[SkipIntro] Failed to fetch range:", err);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY));
       }
     }
     return null;
@@ -112,27 +124,24 @@
   function createLabeledInput(id, labelText, value, placeholder, marginLeft) {
     const label = document.createElement("label");
     label.textContent = labelText;
-
     const input = document.createElement("input");
-    input.id = id;
-    input.value = value || "";
-    input.placeholder = placeholder;
+    Object.assign(input, { id, value: value || "", placeholder });
     Object.assign(input.style, {
       width: "50px",
       color: "white",
       marginLeft,
     });
-
     label.appendChild(input);
     return label;
   }
 
-  function createEditor(bar, existing) {
-    if (document.getElementById(POPUP_ID)) return;
+  function createEditor(container, existing) {
+    if (document.getElementById(POPUP_ID) || popupOpen) return;
+    popupOpen = true;
 
-    const pop = document.createElement("div");
-    pop.id = POPUP_ID;
-    Object.assign(pop.style, {
+    const popup = document.createElement("div");
+    popup.id = POPUP_ID;
+    Object.assign(popup.style, {
       width: "150px",
       position: "absolute",
       bottom: "120px",
@@ -147,22 +156,13 @@
       alignItems: "center",
     });
 
-    // === Get saved unsaved inputs ===
-    const epIdKey = `skiprange-last-${currentEpisodeId}`;
-    const savedDraft = JSON.parse(localStorage.getItem(epIdKey) || "{}");
-
-    function formatTime(seconds) {
-      const m = Math.floor(seconds / 60);
-      const s = Math.floor(seconds % 60);
-      return `${m.toString().padStart(2, "0")}:${s
-        .toString()
-        .padStart(2, "0")}`;
-    }
+    const storageKey = STORAGE_PREFIX + currentEpisodeId;
+    const draft = JSON.parse(localStorage.getItem(storageKey) || "{}");
 
     const startLabel = createLabeledInput(
       "sr-start",
       "Start: ",
-      savedDraft.start ||
+      draft.start ||
         (existing?.start != null ? formatTime(existing.start) : ""),
       "00:00",
       "15px"
@@ -171,15 +171,14 @@
     const endLabel = createLabeledInput(
       "sr-end",
       "End: ",
-      savedDraft.end || (existing?.end != null ? formatTime(existing.end) : ""),
+      draft.end || (existing?.end != null ? formatTime(existing.end) : ""),
       "00:30",
       "22px"
     );
 
-    // Save input on change to localStorage
     const saveDraft = () => {
       localStorage.setItem(
-        epIdKey,
+        storageKey,
         JSON.stringify({
           start: document.getElementById("sr-start").value,
           end: document.getElementById("sr-end").value,
@@ -190,8 +189,10 @@
     endLabel.querySelector("input").addEventListener("input", saveDraft);
 
     const saveBtn = document.createElement("button");
-    saveBtn.id = "sr-save";
-    saveBtn.textContent = "Save";
+    Object.assign(saveBtn, {
+      id: "sr-save",
+      textContent: "Save",
+    });
     Object.assign(saveBtn.style, {
       marginTop: "6px",
       padding: "10px 20px",
@@ -202,48 +203,60 @@
       borderRadius: "6px",
       transition: "background-color .3s",
     });
-    saveBtn.addEventListener(
-      "mouseover",
-      () => (saveBtn.style.backgroundColor = "#1b192b")
-    );
-    saveBtn.addEventListener(
-      "mouseout",
-      () => (saveBtn.style.backgroundColor = "#0f0d20")
-    );
+    saveBtn.onmouseover = () => (saveBtn.style.backgroundColor = "#1b192b");
+    saveBtn.onmouseout = () => (saveBtn.style.backgroundColor = "#0f0d20");
 
     saveBtn.onclick = async (e) => {
       e.preventDefault();
       const start = parseTime(document.getElementById("sr-start").value);
       const end = parseTime(document.getElementById("sr-end").value);
-      if (!(end > start)) return alert("End must be > Start");
 
-      const epId = await getEpisodeId();
+      if (!(end > start)) return alert("End must be greater than Start");
+      if (existing && start === existing.start && end === existing.end) {
+        popup.remove();
+        popupOpen = false;
+        return;
+      }
+
       try {
+        const epId = await getEpisodeId();
         const res = await fetch(`${SERVER_URL}/ranges`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ episodeId: epId, start, end }),
         });
         if (!res.ok) throw new Error(res.status);
-        localStorage.removeItem(epIdKey); // Clear draft after save
-        setTimeout(() => loadRangeForCurrentEpisode(), REFETCH_DELAY);
+
+        localStorage.removeItem(storageKey);
+        delete rangeCache[epId];
+        currentRange = await fetchRangeWithRetry(epId);
+        if (lastVideo) attachTimeUpdate();
       } catch (err) {
-        console.error("[SkipRange] Failed to save:", err);
+        console.error("[SkipIntro] Failed to save range:", err);
       }
-      pop.remove();
-      document.removeEventListener("click", closeOutside);
+
+      popup.remove();
+      popupOpen = false;
     };
 
-    function closeOutside(e) {
-      if (!pop.contains(e.target) && e.target.id !== INLINE_BTN_ID) {
-        pop.remove();
-        document.removeEventListener("click", closeOutside);
+    document.addEventListener("click", function closePopup(e) {
+      if (!popup.contains(e.target) && e.target.id !== INLINE_BTN_ID) {
+        popup.remove();
+        popupOpen = false;
+        document.removeEventListener("click", closePopup);
       }
-    }
+    });
 
-    document.addEventListener("click", closeOutside);
-    pop.append(startLabel, endLabel, saveBtn);
-    bar.appendChild(pop);
+    document.addEventListener("keydown", function escClose(e) {
+      if (e.key === "Escape") {
+        popup.remove();
+        popupOpen = false;
+        document.removeEventListener("keydown", escClose);
+      }
+    });
+
+    popup.append(startLabel, endLabel, saveBtn);
+    container.appendChild(popup);
   }
 
   function addSetupButton(bar) {
@@ -253,14 +266,14 @@
     btn.id = INLINE_BTN_ID;
 
     const icon = document.createElement("img");
-    icon.src = "https://www.svgrepo.com/show/532105/clock-lines.svg";
-    icon.width = 30;
-    icon.height = 30;
-    icon.alt = "Clock icon";
-    Object.assign(icon.style, {
-      verticalAlign: "middle",
-      filter: "brightness(0) invert(1)",
+    Object.assign(icon, {
+      src: "https://www.svgrepo.com/show/532105/clock-lines.svg",
+      width: 30,
+      height: 30,
+      alt: "Clock icon",
     });
+    icon.style.filter = "brightness(0) invert(1)";
+    icon.style.pointerEvents = "none";
 
     Object.assign(btn.style, {
       padding: "6px",
@@ -270,50 +283,39 @@
     });
 
     btn.appendChild(icon);
-    btn.onclick = async (e) => {
-      e.preventDefault();
-      const epId = await getEpisodeId();
-      let existing = null;
-      try {
-        const head = await fetch(
-          `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`,
-          { method: "HEAD" }
-        );
-        if (head.status === 200) {
-          const getRes = await fetch(
-            `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`
-          );
-          if (getRes.ok) existing = await getRes.json();
-        }
-      } catch (err) {
-        console.error("[SkipRange] Error loading existing range:", err);
+    btn.onclick = () => {
+      const existingPopup = document.getElementById(POPUP_ID);
+      if (existingPopup) {
+        existingPopup.remove();
+        popupOpen = false;
+        return;
       }
-      createEditor(bar, existing);
+      createEditor(bar, currentRange);
     };
+
     bar.prepend(btn);
   }
 
-  function showActiveSkip(wrap, end) {
+  function showActiveSkip(container, end) {
     if (document.getElementById(ACTIVE_BTN_ID)) return;
 
-    const b = document.createElement("button");
-    b.id = ACTIVE_BTN_ID;
-    b.textContent = "Skip Intro";
+    const skipBtn = document.createElement("button");
+    skipBtn.id = ACTIVE_BTN_ID;
+    skipBtn.textContent = "Skip Intro";
 
     const icon = document.createElement("img");
     icon.src = "https://www.svgrepo.com/show/471906/skip-forward.svg";
     icon.alt = "Skip icon";
     icon.width = 24;
     icon.height = 24;
-    Object.assign(icon.style, {
-      filter: "brightness(0) invert(1)",
-    });
+    icon.style.filter = "brightness(0) invert(1)";
+    icon.style.pointerEvents = "none";
 
-    Object.assign(b.style, {
+    Object.assign(skipBtn.style, {
       position: "absolute",
       bottom: "130px",
       right: "10vh",
-      padding: "8px 12px",
+      padding: "16px",
       background: "#0f0d20",
       color: "#fff",
       border: "none",
@@ -324,61 +326,48 @@
       display: "flex",
       alignItems: "center",
       gap: "8px",
-      padding: "16px",
     });
 
-    b.prepend(icon);
-
-    b.addEventListener("mouseover", () => {
-      b.style.backgroundColor = "#1b192b";
-    });
-    b.addEventListener("mouseout", () => {
-      b.style.backgroundColor = "#0f0d20";
-    });
-
-    b.onclick = (e) => {
+    skipBtn.prepend(icon);
+    skipBtn.onmouseover = () => (skipBtn.style.backgroundColor = "#1b192b");
+    skipBtn.onmouseout = () => (skipBtn.style.backgroundColor = "#0f0d20");
+    skipBtn.onclick = (e) => {
       e.preventDefault();
-      document.querySelector("video").currentTime = end;
-      b.remove();
+      if (document.querySelector("video"))
+        document.querySelector("video").currentTime = end;
+      skipBtn.remove();
     };
 
-    wrap.appendChild(b);
-  }
-
-  let currentEpisodeId = null;
-  let currentRange = null;
-  let lastVideo = null;
-  let onTimeUpdate = null;
-
-  async function loadRangeForCurrentEpisode() {
-    if (!currentEpisodeId) return;
-    const data = await fetchRangeWithRetry(currentEpisodeId);
-    currentRange = data;
-    if (data && lastVideo) attachTimeUpdate();
+    container.appendChild(skipBtn);
   }
 
   function attachTimeUpdate() {
-    if (onTimeUpdate && lastVideo)
+    if (onTimeUpdate && lastVideo) {
       lastVideo.removeEventListener("timeupdate", onTimeUpdate);
+    }
 
     onTimeUpdate = () => {
-      if (
-        lastVideo.currentTime >= currentRange.start &&
-        lastVideo.currentTime < currentRange.end
-      ) {
-        showActiveSkip(lastVideo.parentElement, currentRange.end);
-      }
+      const video = lastVideo;
+      const btn = document.getElementById(ACTIVE_BTN_ID);
+      const inRange =
+        currentRange &&
+        video.currentTime >= currentRange.start &&
+        video.currentTime < currentRange.end;
+
+      if (inRange && !btn)
+        showActiveSkip(video.parentElement, currentRange.end);
+      else if (!inRange && btn) btn.remove();
     };
 
-    lastVideo.addEventListener("timeupdate", onTimeUpdate);
+    lastVideo?.addEventListener("timeupdate", onTimeUpdate);
   }
 
-  async function onPlayOnceCheck() {
+  async function onPlay() {
     const epId = await getEpisodeId();
     if (epId !== currentEpisodeId) {
       currentEpisodeId = epId;
-      currentRange = null;
-      await loadRangeForCurrentEpisode();
+      currentRange = await fetchRangeWithRetry(epId);
+      if (lastVideo) attachTimeUpdate();
     }
   }
 
@@ -386,22 +375,21 @@
     const video = document.querySelector("video");
     if (!video || video === lastVideo) return;
 
-    if (lastVideo) {
-      lastVideo.removeEventListener("play", onPlayOnceCheck);
-      if (onTimeUpdate)
-        lastVideo.removeEventListener("timeupdate", onTimeUpdate);
-    }
+    lastVideo?.removeEventListener("play", onPlay);
+    if (onTimeUpdate)
+      lastVideo?.removeEventListener("timeupdate", onTimeUpdate);
 
-    video.addEventListener("play", onPlayOnceCheck);
+    video.addEventListener("play", onPlay);
     lastVideo = video;
   }
 
-  const obs = new MutationObserver(() => {
+  const observer = new MutationObserver(() => {
     const bar = document.querySelector(
       ".control-bar-buttons-menu-container-M6L0_"
     );
     if (bar) addSetupButton(bar);
     attachPlayListener();
   });
-  obs.observe(document.body, { childList: true, subtree: true });
+
+  observer.observe(document.body, { childList: true, subtree: true });
 })();
