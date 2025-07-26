@@ -23,8 +23,6 @@
   let popupOpen = false;
   const rangeCache = {};
 
-  console.info(`[SkipIntro] v1.1.0 loaded`);
-
   function _eval(js) {
     return new Promise((resolve) => {
       const event = "stremio-enhanced";
@@ -89,20 +87,37 @@
         console.log(
           `[SkipIntro] Fetching /ranges/${epId} (attempt ${attempt})`
         );
+
         const res = await fetch(
           `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`
         );
-        if (res.status === 204 || res.status === 404) return null;
-        if (!res.ok) throw new Error(res.status);
+
+        if (res.status === 204 || res.status === 404) {
+          console.log(
+            `[SkipIntro] No skip data for episode ${epId} (${res.status})`
+          );
+          return null;
+        }
+
+        if (!res.ok) {
+          console.warn(
+            `[SkipIntro] Unexpected response for ${epId}: ${res.status}`
+          );
+          return null;
+        }
+
         const json = await res.json();
         console.log(
-          `[SkipIntro] Loaded range from server: start=${json.start}s, end=${json.end}s`
+          `[SkipIntro] Loaded range: start=${json.start}s → end=${json.end}s`
         );
         return json;
       } catch (err) {
-        if (attempt === MAX_RETRIES)
-          console.error("[SkipIntro] Failed to fetch range:", err);
-        await new Promise((r) => setTimeout(r, RETRY_DELAY));
+        console.error(`[SkipIntro] Error fetching range for ${epId}:`, err);
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY));
+        } else {
+          return null;
+        }
       }
     }
     return null;
