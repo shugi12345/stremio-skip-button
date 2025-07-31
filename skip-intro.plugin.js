@@ -330,24 +330,38 @@
   }
 
   function attachTimeUpdate() {
-    if (onTimeUpdate && lastVideo) {
-      lastVideo.removeEventListener("timeupdate", onTimeUpdate);
+  if (!lastVideo) return;
+
+  // Clean up old listeners if they exist
+  if (onTimeUpdate) lastVideo.removeEventListener("timeupdate", onTimeUpdate);
+  if (onSeeked) lastVideo.removeEventListener("seeked", onSeeked);
+
+  // small tolerance to avoid floating point edge issues
+  const epsilon = 0.1;
+
+  onTimeUpdate = () => {
+    const video = lastVideo;
+    const btn = document.getElementById(ACTIVE_BTN_ID);
+    const inRange =
+      currentRange &&
+      video.currentTime + epsilon >= currentRange.start &&
+      video.currentTime < currentRange.end;
+
+    if (inRange && !btn) {
+      showActiveSkip(video.parentElement, currentRange.end);
+    } else if ((!inRange || video.currentTime >= currentRange.end) && btn) {
+      btn.remove();
     }
+  };
 
-    onTimeUpdate = () => {
-      const video = lastVideo;
-      const btn = document.getElementById(ACTIVE_BTN_ID);
-      const inRange =
-        currentRange &&
-        video.currentTime >= currentRange.start &&
-        video.currentTime < currentRange.end;
+  // If user seeks (rewind/forward), re-evaluate immediately
+  onSeeked = () => {
+    onTimeUpdate();
+  };
 
-      if (inRange && !btn) showActiveSkip(video.parentElement, currentRange.end);
-      else if (!inRange && btn) btn.remove();
-    };
-
-    lastVideo?.addEventListener("timeupdate", onTimeUpdate);
-  }
+  lastVideo.addEventListener("timeupdate", onTimeUpdate);
+  lastVideo.addEventListener("seeked", onSeeked);
+}
 
   let lastCheckedEpisodeId = null;
 
