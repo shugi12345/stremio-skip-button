@@ -44,7 +44,7 @@ This is a **community-based project**: intro timestamps must be created manually
 5. 💾 Click **Save**.  
    - That range is saved centrally and becomes available to others.  
    - Once the range is present, a **Skip Intro** button appears when playback enters the specified range.  
-6. ↩️ If you rewind back into the intro, the skip button will reappear (thanks to improved seek handling).
+6. ↩️ If you rewind back into the intro, the skip button will appear.
 
 ---
 
