@@ -1,4 +1,4 @@
-# Unofficial SkipIntro plugin for Stremio Enhanced
+# Unofficial Intro Skip plugin for Stremio Enhanced
 
 **Version:** 1.0.0  
 **Author:** shugi12345  
