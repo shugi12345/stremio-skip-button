@@ -58,8 +58,8 @@ This is a **community-based project**: intro timestamps must be created manually
 
 ## 🛠️ Troubleshooting
 
-- **Saved range doesn’t appear for others**  
-  The project relies on a central server. If saving fails, check console logs for network errors and ensure your connection to the server is intact. 🔍
+- **I dont see an intro button**  
+  check the logs using ctrl + shift + i, if you dont see an error it means it just didnt have a time range saved for this episode (then please add it yourself for others😊) if you see an error please open a bug report. 🔍
 
 ---
 
