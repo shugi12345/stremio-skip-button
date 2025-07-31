@@ -109,6 +109,10 @@ app.delete("/ranges/:episodeId", async (req, res) => {
   }
 });
 
+app.get("/ping", (req, res) => {
+  res.json({ status: "ok", time: new Date().toISOString() });
+});
+
 // --- Start server ---
 mongoose
   .connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
