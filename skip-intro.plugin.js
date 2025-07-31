@@ -8,7 +8,7 @@
 (function () {
   "use strict";
 
-  const SERVER_URL = "https://stremio-skip-button.onrender.com";
+  const SERVER_URL = "https://busy-jacinta-shugi-c2885b2e.koyeb.app";
   const INLINE_BTN_ID = "skiprange-setup-btn";
   const POPUP_ID = "skiprange-editor";
   const ACTIVE_BTN_ID = "skiprange-active-btn";
@@ -27,14 +27,10 @@
     return new Promise((resolve) => {
       const event = "stremio-enhanced";
       const script = document.createElement("script");
-      window.addEventListener(
-        event,
-        (e) => {
-          script.remove();
-          resolve(e.detail);
-        },
-        { once: true }
-      );
+      window.addEventListener(event, (e) => {
+        script.remove();
+        resolve(e.detail);
+      }, { once: true });
 
       script.textContent = `
         (async () => {
@@ -55,8 +51,7 @@
     let state = null;
     while (!state?.metaItem?.content) {
       state = await _eval("window.services.core.transport.getState('player')");
-      if (!state?.metaItem?.content)
-        await new Promise((r) => setTimeout(r, 300));
+      if (!state?.metaItem?.content) await new Promise(r => setTimeout(r, 300));
     }
     return { seriesInfo: state.seriesInfo, meta: state.metaItem.content };
   }
@@ -72,45 +67,32 @@
   }
 
   function formatTime(seconds) {
-    const m = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, "0");
-    const s = Math.floor(seconds % 60)
-      .toString()
-      .padStart(2, "0");
+    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+    const s = Math.floor(seconds % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   }
 
   async function fetchRangeWithRetry(epId) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        console.log(
-          `[SkipIntro] Fetching /ranges/${epId} (attempt ${attempt})`
-        );
+        console.log(`[SkipIntro] Fetching /ranges/${epId} (attempt ${attempt})`);
 
-        const res = await fetch(
-          `${SERVER_URL}/ranges/${encodeURIComponent(epId)}`
-        );
-
+        const res = await fetch(`${SERVER_URL}/ranges/${encodeURIComponent(epId)}`);
+        
         if (res.status === 204 || res.status === 404) {
-          console.log(
-            `[SkipIntro] No skip data for episode ${epId} (${res.status})`
-          );
+          console.log(`[SkipIntro] No skip data for episode ${epId} (${res.status})`);
           return null;
         }
 
         if (!res.ok) {
-          console.warn(
-            `[SkipIntro] Unexpected response for ${epId}: ${res.status}`
-          );
+          console.warn(`[SkipIntro] Unexpected response for ${epId}: ${res.status}`);
           return null;
         }
 
         const json = await res.json();
-        console.log(
-          `[SkipIntro] Loaded range: start=${json.start}s → end=${json.end}s`
-        );
+        console.log(`[SkipIntro] Loaded range: start=${json.start}s → end=${json.end}s`);
         return json;
+
       } catch (err) {
         console.error(`[SkipIntro] Error fetching range for ${epId}:`, err);
         if (attempt < MAX_RETRIES) {
@@ -122,6 +104,7 @@
     }
     return null;
   }
+
 
   function createLabeledInput(id, labelText, value, placeholder, marginLeft) {
     const label = document.createElement("label");
@@ -162,30 +145,22 @@
     const draft = JSON.parse(localStorage.getItem(storageKey) || "{}");
 
     const startLabel = createLabeledInput(
-      "sr-start",
-      "Start: ",
-      draft.start ||
-        (existing?.start != null ? formatTime(existing.start) : ""),
-      "00:00",
-      "15px"
+      "sr-start", "Start: ",
+      draft.start || (existing?.start != null ? formatTime(existing.start) : ""),
+      "00:00", "15px"
     );
 
     const endLabel = createLabeledInput(
-      "sr-end",
-      "End: ",
+      "sr-end", "End: ",
       draft.end || (existing?.end != null ? formatTime(existing.end) : ""),
-      "00:30",
-      "22px"
+      "00:30", "22px"
     );
 
     const saveDraft = () => {
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify({
-          start: document.getElementById("sr-start").value,
-          end: document.getElementById("sr-end").value,
-        })
-      );
+      localStorage.setItem(storageKey, JSON.stringify({
+        start: document.getElementById("sr-start").value,
+        end: document.getElementById("sr-end").value,
+      }));
     };
     startLabel.querySelector("input").addEventListener("input", saveDraft);
     endLabel.querySelector("input").addEventListener("input", saveDraft);
@@ -205,8 +180,8 @@
       borderRadius: "6px",
       transition: "background-color .3s",
     });
-    saveBtn.onmouseover = () => (saveBtn.style.backgroundColor = "#1b192b");
-    saveBtn.onmouseout = () => (saveBtn.style.backgroundColor = "#0f0d20");
+    saveBtn.onmouseover = () => saveBtn.style.backgroundColor = "#1b192b";
+    saveBtn.onmouseout = () => saveBtn.style.backgroundColor = "#0f0d20";
 
     saveBtn.onclick = async (e) => {
       e.preventDefault();
@@ -235,12 +210,7 @@
         const res = await fetch(`${SERVER_URL}/ranges`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            episodeId: epId,
-            start,
-            end,
-            title: readableTitle,
-          }),
+          body: JSON.stringify({ episodeId: epId, start, end, title: readableTitle }),
         });
 
         if (!res.ok) throw new Error(res.status);
@@ -347,8 +317,8 @@
     });
 
     skipBtn.prepend(icon);
-    skipBtn.onmouseover = () => (skipBtn.style.backgroundColor = "#1b192b");
-    skipBtn.onmouseout = () => (skipBtn.style.backgroundColor = "#0f0d20");
+    skipBtn.onmouseover = () => skipBtn.style.backgroundColor = "#1b192b";
+    skipBtn.onmouseout = () => skipBtn.style.backgroundColor = "#0f0d20";
     skipBtn.onclick = (e) => {
       e.preventDefault();
       if (document.querySelector("video"))
@@ -360,25 +330,38 @@
   }
 
   function attachTimeUpdate() {
-    if (onTimeUpdate && lastVideo) {
-      lastVideo.removeEventListener("timeupdate", onTimeUpdate);
+  if (!lastVideo) return;
+
+  // Clean up old listeners if they exist
+  if (onTimeUpdate) lastVideo.removeEventListener("timeupdate", onTimeUpdate);
+  if (onSeeked) lastVideo.removeEventListener("seeked", onSeeked);
+
+  // small tolerance to avoid floating point edge issues
+  const epsilon = 0.1;
+
+  onTimeUpdate = () => {
+    const video = lastVideo;
+    const btn = document.getElementById(ACTIVE_BTN_ID);
+    const inRange =
+      currentRange &&
+      video.currentTime + epsilon >= currentRange.start &&
+      video.currentTime < currentRange.end;
+
+    if (inRange && !btn) {
+      showActiveSkip(video.parentElement, currentRange.end);
+    } else if ((!inRange || video.currentTime >= currentRange.end) && btn) {
+      btn.remove();
     }
+  };
 
-    onTimeUpdate = () => {
-      const video = lastVideo;
-      const btn = document.getElementById(ACTIVE_BTN_ID);
-      const inRange =
-        currentRange &&
-        video.currentTime >= currentRange.start &&
-        video.currentTime < currentRange.end;
+  // If user seeks (rewind/forward), re-evaluate immediately
+  onSeeked = () => {
+    onTimeUpdate();
+  };
 
-      if (inRange && !btn)
-        showActiveSkip(video.parentElement, currentRange.end);
-      else if (!inRange && btn) btn.remove();
-    };
-
-    lastVideo?.addEventListener("timeupdate", onTimeUpdate);
-  }
+  lastVideo.addEventListener("timeupdate", onTimeUpdate);
+  lastVideo.addEventListener("seeked", onSeeked);
+}
 
   let lastCheckedEpisodeId = null;
 
@@ -392,22 +375,20 @@
     }
   }
 
+
   function attachPlayListener() {
     const video = document.querySelector("video");
     if (!video || video === lastVideo) return;
 
     lastVideo?.removeEventListener("play", onPlay);
-    if (onTimeUpdate)
-      lastVideo?.removeEventListener("timeupdate", onTimeUpdate);
+    if (onTimeUpdate) lastVideo?.removeEventListener("timeupdate", onTimeUpdate);
 
     video.addEventListener("play", onPlay);
     lastVideo = video;
   }
 
   const observer = new MutationObserver(() => {
-    const bar = document.querySelector(
-      ".control-bar-buttons-menu-container-M6L0_"
-    );
+    const bar = document.querySelector(".control-bar-buttons-menu-container-M6L0_");
     if (bar) addSetupButton(bar);
     attachPlayListener();
   });
