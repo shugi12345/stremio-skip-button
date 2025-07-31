@@ -21,6 +21,7 @@
   let lastVideo = null;
   let onTimeUpdate = null;
   let popupOpen = false;
+  let onSeeked = null;
   const rangeCache = {};
 
   function _eval(js) {
@@ -332,11 +333,10 @@
   function attachTimeUpdate() {
   if (!lastVideo) return;
 
-  // Clean up old listeners if they exist
+  // clean old listeners
   if (onTimeUpdate) lastVideo.removeEventListener("timeupdate", onTimeUpdate);
   if (onSeeked) lastVideo.removeEventListener("seeked", onSeeked);
 
-  // small tolerance to avoid floating point edge issues
   const epsilon = 0.1;
 
   onTimeUpdate = () => {
@@ -347,21 +347,18 @@
       video.currentTime + epsilon >= currentRange.start &&
       video.currentTime < currentRange.end;
 
-    if (inRange && !btn) {
-      showActiveSkip(video.parentElement, currentRange.end);
-    } else if ((!inRange || video.currentTime >= currentRange.end) && btn) {
-      btn.remove();
-    }
+    if (inRange && !btn) showActiveSkip(video.parentElement, currentRange.end);
+    else if ((!inRange || video.currentTime >= currentRange.end) && btn) btn.remove();
   };
 
-  // If user seeks (rewind/forward), re-evaluate immediately
-  onSeeked = () => {
-    onTimeUpdate();
-  };
+    // this runs right after a seek/rewind/jump completes
+    onSeeked = () => {
+      onTimeUpdate(); // re-evaluate immediately
+    };
 
-  lastVideo.addEventListener("timeupdate", onTimeUpdate);
-  lastVideo.addEventListener("seeked", onSeeked);
-}
+    lastVideo.addEventListener("timeupdate", onTimeUpdate);
+    lastVideo.addEventListener("seeked", onSeeked);
+  }
 
   let lastCheckedEpisodeId = null;
 
