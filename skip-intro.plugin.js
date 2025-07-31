@@ -362,15 +362,23 @@
 
   let lastCheckedEpisodeId = null;
 
-  async function onPlay() {
-    const epId = await getEpisodeId();
-    if (epId !== currentEpisodeId || epId !== lastCheckedEpisodeId) {
-      lastCheckedEpisodeId = epId;
-      currentEpisodeId = epId;
+async function onPlay() {
+  const epId = await getEpisodeId();
+
+  // Always refresh if it's a new episode; if it's the same episode, ensure we still have a range.
+  if (epId !== currentEpisodeId) {
+    currentEpisodeId = epId;
+    lastCheckedEpisodeId = epId;
+    currentRange = await fetchRangeWithRetry(epId);
+  } else {
+    // same episode—make sure range is present (could have been lost)
+    if (!currentRange) {
       currentRange = await fetchRangeWithRetry(epId);
-      if (lastVideo) attachTimeUpdate();
     }
   }
+
+  if (lastVideo) attachTimeUpdate();
+}
 
 
   function attachPlayListener() {
