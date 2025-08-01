@@ -63,7 +63,7 @@ app.get("/ranges/:episodeId", async (req, res) => {
   try {
     const range = await SkipRange.findOne({ episodeId });
     if (!range) {
-      console.log(`[Server] No range for ${episodeId}, returning 204`);
+      console.log(`[Server] No range for ${episodeId} (${title}), returning 204`);
       return res.sendStatus(204);
     }
     console.log(
