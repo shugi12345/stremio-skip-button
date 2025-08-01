@@ -84,7 +84,7 @@ app.get("/download-db", async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.status(200).send(JSON.stringify(ranges, null, 2));
   } catch (err) {
-    console.error("[Server] Erreur lors du téléchargement de la base :", err);
+    console.error("[Server] Error while downloading the database :", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
