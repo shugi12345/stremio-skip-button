@@ -156,7 +156,7 @@
     const popup = document.createElement("div");
     popup.id = POPUP_ID;
     Object.assign(popup.style, {
-      width: "225px",
+      width: "250px",
       position: "absolute",
       bottom: "120px",
       background: "#0f0d20",
@@ -373,7 +373,7 @@
       if (inRange && !document.getElementById(ACTIVE_BTN_ID)) {
         showActiveSkip(lastVideo.parentElement, currentRange.end);
       } else if ((!inRange || lastVideo.currentTime >= currentRange.end) &&
-                 document.getElementById(ACTIVE_BTN_ID)) {
+        document.getElementById(ACTIVE_BTN_ID)) {
         document.getElementById(ACTIVE_BTN_ID).remove();
       }
     };
