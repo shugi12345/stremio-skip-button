@@ -60,15 +60,23 @@
     return `${meta.id}:${seriesInfo?.episode || 0}`;
   }
 
+  function getCurrentTimeStamp() {
+    const div = document.querySelector('.label-QFbsS');
+    if (!div) return formatTime(0);
+    return div.innerText;
+  }
+
   function parseTime(str) {
-    const [min, sec] = str.split(":").map(Number);
-    return (min || 0) * 60 + (sec || 0);
+    const [hour, min, sec] = str.split(":").map(Number);
+    return (hour || 0) * 3600 + (min || 0) * 60 + (sec || 0);
   }
 
   function formatTime(seconds) {
-    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+    if (!seconds || isNaN(parseInt(seconds))) seconds = 0;
+    const h = Math.floor(seconds / 3600).toString().padStart(2, "0");
+    const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0");
     const s = Math.floor(seconds % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
+    return `${h}:${m}:${s}`;
   }
 
   async function fetchRangeWithRetry(epId) {
@@ -136,7 +144,7 @@
     label.textContent = labelText;
     const input = document.createElement("input");
     Object.assign(input, { id, value: value || "", placeholder });
-    Object.assign(input.style, { width: "50px", color: "white", marginLeft });
+    Object.assign(input.style, { width: "100px", color: "white", marginLeft });
     label.appendChild(input);
     return label;
   }
@@ -148,7 +156,7 @@
     const popup = document.createElement("div");
     popup.id = POPUP_ID;
     Object.assign(popup.style, {
-      width: "150px",
+      width: "225px",
       position: "absolute",
       bottom: "120px",
       background: "#0f0d20",
@@ -186,6 +194,7 @@
     startLabel.querySelector("input").addEventListener("input", saveDraft);
     endLabel.querySelector("input").addEventListener("input", saveDraft);
 
+    const btnContainer = document.createElement('div');
     const saveBtn = document.createElement("button");
     Object.assign(saveBtn, { id: "sr-save", textContent: "Save" });
     Object.assign(saveBtn.style, {
@@ -238,6 +247,32 @@
       popupOpen = false;
     };
 
+    const currentTimeBtn = document.createElement("button");
+    Object.assign(currentTimeBtn, { id: "sr-currentTime", textContent: "Current Time" });
+    Object.assign(currentTimeBtn.style, {
+      marginTop: "6px",
+      padding: "10px 20px",
+      color: "white",
+      cursor: "pointer",
+      backgroundColor: "#0f0d20",
+      border: "none",
+      borderRadius: "6px",
+      transition: "background-color .3s",
+    });
+    currentTimeBtn.onmouseover = () => currentTimeBtn.style.backgroundColor = "#1b192b";
+    currentTimeBtn.onmouseout = () => currentTimeBtn.style.backgroundColor = "#0f0d20";
+    // check if start already has a value. If it does, then set the end value
+    currentTimeBtn.onclick = async (e) => {
+      console.log(document.getElementById("sr-start").value);
+      if (document.getElementById("sr-start").value?.length > 0) {
+        document.getElementById("sr-end").value = getCurrentTimeStamp();
+      } else {
+        document.getElementById("sr-start").value = getCurrentTimeStamp();
+      }
+      saveDraft();
+    };
+
+    btnContainer.append(currentTimeBtn, saveBtn);
     document.addEventListener("click", function closePopup(e) {
       if (!popup.contains(e.target) && e.target.id !== INLINE_BTN_ID) {
         popup.remove();
@@ -254,7 +289,7 @@
       }
     });
 
-    popup.append(startLabel, endLabel, saveBtn);
+    popup.append(startLabel, endLabel, btnContainer);
     container.appendChild(popup);
   }
 
