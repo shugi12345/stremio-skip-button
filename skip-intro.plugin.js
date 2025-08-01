@@ -73,16 +73,30 @@
 
   async function fetchRangeWithRetry(epId) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      console.log(`[SkipIntro] Fetching /ranges/${epId} (attempt ${attempt})`);
       try {
         const res = await fetch(`${SERVER_URL}/ranges/${encodeURIComponent(epId)}`);
-        if (res.status === 204 || res.status === 404) return null;
-        if (!res.ok) return null;
-        return await res.json();
-      } catch {
-        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, RETRY_DELAY));
-        else return null;
+        if (res.status === 204 || res.status === 404) {
+          console.log(`[SkipIntro] No skip data for episode ${epId} (${res.status})`);
+          return null;
+        }
+        if (!res.ok) {
+          console.warn(`[SkipIntro] Unexpected response for ${epId}: ${res.status}`);
+          return null;
+        }
+        const json = await res.json();
+        console.log(`[SkipIntro] Loaded range: start=${json.start}s → end=${json.end}s`);
+        return json;
+      } catch (err) {
+        console.error(`[SkipIntro] Error fetching range for ${epId}:`, err);
+        if (attempt < MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY));
+        } else {
+          return null;
+        }
       }
     }
+    return null;
   }
 
   function highlightRangeOnBar() {
@@ -105,8 +119,7 @@
         });
         const thumbEl = slider.querySelector('.thumb-PiTF5');
         const thumbLayer = thumbEl && thumbEl.parentNode;
-        highlight.style.zIndex = '0';
-        slider.insertBefore(highlight, thumbLayer);
+        slider.insertBefore(highlight, thumbLayer && slider.contains(thumbLayer) ? thumbLayer : slider.firstChild);
       }
       const { duration } = lastVideo;
       const startPct = (currentRange.start / duration) * 100;
@@ -198,21 +211,23 @@
         popupOpen = false;
         return;
       }
+      const { meta, seriesInfo } = await getPlayerState();
+      const epId = `${meta.id}:${seriesInfo?.episode || 0}`;
+      console.log(`[SkipIntro] Saving range for ${epId}: start=${start}, end=${end}`);
+      let title = meta?.name || "Unknown Title";
+      if (seriesInfo?.season != null && seriesInfo?.episode != null) {
+        const s = String(seriesInfo.season).padStart(2, "0");
+        const e = String(seriesInfo.episode).padStart(2, "0");
+        title = `${title} S${s}E${e}`;
+      }
       try {
-        const { meta, seriesInfo } = await getPlayerState();
-        const epId = `${meta.id}:${seriesInfo?.episode || 0}`;
-        let title = meta?.name || "Unknown Title";
-        if (seriesInfo?.season != null && seriesInfo?.episode != null) {
-          const s = String(seriesInfo.season).padStart(2, "0");
-          const e = String(seriesInfo.episode).padStart(2, "0");
-          title = `${title} S${s}E${e}`;
-        }
         const res = await fetch(`${SERVER_URL}/ranges`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ episodeId: epId, start, end, title }),
         });
         if (!res.ok) throw new Error(res.status);
+        console.log(`[SkipIntro] Successfully saved skip range for ${epId}`);
         localStorage.removeItem(storageKey);
         currentRange = await fetchRangeWithRetry(epId);
         highlightRangeOnBar();
