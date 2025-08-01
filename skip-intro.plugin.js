@@ -1,7 +1,7 @@
 /**
  * @name SkipIntro
  * @description Skip Intro for shows and movies in Stremio Enhanced
- * @version 1.0.0
+ * @version 1.1.0
  * @author shugi12345
  */
 
@@ -22,7 +22,6 @@
   let onTimeUpdate = null;
   let popupOpen = false;
   let onSeeked = null;
-  const rangeCache = {};
 
   function _eval(js) {
     return new Promise((resolve) => {
@@ -32,7 +31,6 @@
         script.remove();
         resolve(e.detail);
       }, { once: true });
-
       script.textContent = `
         (async () => {
           try {
@@ -40,7 +38,7 @@
             if (res instanceof Promise) res.then(r => window.dispatchEvent(new CustomEvent('${event}', { detail: r })));
             else window.dispatchEvent(new CustomEvent('${event}', { detail: res }));
           } catch (err) {
-            console.error('[SkipIntro] _eval error:', err);
+            console.error(err);
             window.dispatchEvent(new CustomEvent('${event}', { detail: null }));
           }
         })();`;
@@ -76,47 +74,56 @@
   async function fetchRangeWithRetry(epId) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        console.log(`[SkipIntro] Fetching /ranges/${epId} (attempt ${attempt})`);
-
         const res = await fetch(`${SERVER_URL}/ranges/${encodeURIComponent(epId)}`);
-        
-        if (res.status === 204 || res.status === 404) {
-          console.log(`[SkipIntro] No skip data for episode ${epId} (${res.status})`);
-          return null;
-        }
-
-        if (!res.ok) {
-          console.warn(`[SkipIntro] Unexpected response for ${epId}: ${res.status}`);
-          return null;
-        }
-
-        const json = await res.json();
-        console.log(`[SkipIntro] Loaded range: start=${json.start}s → end=${json.end}s`);
-        return json;
-
-      } catch (err) {
-        console.error(`[SkipIntro] Error fetching range for ${epId}:`, err);
-        if (attempt < MAX_RETRIES) {
-          await new Promise((r) => setTimeout(r, RETRY_DELAY));
-        } else {
-          return null;
-        }
+        if (res.status === 204 || res.status === 404) return null;
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, RETRY_DELAY));
+        else return null;
       }
     }
-    return null;
   }
 
+  function highlightRangeOnBar() {
+    const slider = document.querySelector(".slider-container-nJz5F");
+    if (!slider) return;
+    let highlight = slider.querySelector(".intro-highlight");
+    if (currentRange && lastVideo && lastVideo.duration) {
+      if (!highlight) {
+        highlight = document.createElement("div");
+        highlight.className = "intro-highlight";
+        const trackEl = slider.querySelector(".track-gItfW");
+        Object.assign(highlight.style, {
+          position: "absolute",
+          top: trackEl.offsetTop + "px",
+          borderRadius: "4px",
+          height: trackEl.clientHeight + "px",
+          background: "rgba(255, 217, 0, 0.6)",
+          pointerEvents: "none",
+          zIndex: "0"
+        });
+        const thumbEl = slider.querySelector('.thumb-PiTF5');
+        const thumbLayer = thumbEl && thumbEl.parentNode;
+        highlight.style.zIndex = '0';
+        slider.insertBefore(highlight, thumbLayer);
+      }
+      const { duration } = lastVideo;
+      const startPct = (currentRange.start / duration) * 100;
+      const widthPct = ((currentRange.end - currentRange.start) / duration) * 100;
+      highlight.style.left = `${startPct}%`;
+      highlight.style.width = `${widthPct}%`;
+    } else if (highlight) {
+      highlight.remove();
+    }
+  }
 
   function createLabeledInput(id, labelText, value, placeholder, marginLeft) {
     const label = document.createElement("label");
     label.textContent = labelText;
     const input = document.createElement("input");
     Object.assign(input, { id, value: value || "", placeholder });
-    Object.assign(input.style, {
-      width: "50px",
-      color: "white",
-      marginLeft,
-    });
+    Object.assign(input.style, { width: "50px", color: "white", marginLeft });
     label.appendChild(input);
     return label;
   }
@@ -167,10 +174,7 @@
     endLabel.querySelector("input").addEventListener("input", saveDraft);
 
     const saveBtn = document.createElement("button");
-    Object.assign(saveBtn, {
-      id: "sr-save",
-      textContent: "Save",
-    });
+    Object.assign(saveBtn, { id: "sr-save", textContent: "Save" });
     Object.assign(saveBtn.style, {
       marginTop: "6px",
       padding: "10px 20px",
@@ -188,42 +192,33 @@
       e.preventDefault();
       const start = parseTime(document.getElementById("sr-start").value);
       const end = parseTime(document.getElementById("sr-end").value);
-
       if (!(end > start)) return alert("End must be greater than Start");
       if (existing && start === existing.start && end === existing.end) {
         popup.remove();
         popupOpen = false;
         return;
       }
-
       try {
         const { meta, seriesInfo } = await getPlayerState();
         const epId = `${meta.id}:${seriesInfo?.episode || 0}`;
-        const title = meta?.name || "Unknown Title";
-
-        let readableTitle = title;
+        let title = meta?.name || "Unknown Title";
         if (seriesInfo?.season != null && seriesInfo?.episode != null) {
-          const season = String(seriesInfo.season).padStart(2, "0");
-          const episode = String(seriesInfo.episode).padStart(2, "0");
-          readableTitle = `${title} S${season}E${episode}`;
+          const s = String(seriesInfo.season).padStart(2, "0");
+          const e = String(seriesInfo.episode).padStart(2, "0");
+          title = `${title} S${s}E${e}`;
         }
-
         const res = await fetch(`${SERVER_URL}/ranges`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ episodeId: epId, start, end, title: readableTitle }),
+          body: JSON.stringify({ episodeId: epId, start, end, title }),
         });
-
         if (!res.ok) throw new Error(res.status);
-
         localStorage.removeItem(storageKey);
-        delete rangeCache[epId];
         currentRange = await fetchRangeWithRetry(epId);
-        if (lastVideo) attachTimeUpdate();
+        highlightRangeOnBar();
       } catch (err) {
-        console.error("[SkipIntro] Failed to save range:", err);
+        console.error(err);
       }
-
       popup.remove();
       popupOpen = false;
     };
@@ -250,56 +245,45 @@
 
   function addSetupButton(bar) {
     if (document.getElementById(INLINE_BTN_ID)) return;
-
     const btn = document.createElement("button");
     btn.id = INLINE_BTN_ID;
-
     const icon = document.createElement("img");
     Object.assign(icon, {
       src: "https://www.svgrepo.com/show/532105/clock-lines.svg",
-      width: 30,
-      height: 30,
-      alt: "Clock icon",
+      width: 30, height: 30, alt: "Clock icon"
     });
     icon.style.filter = "brightness(0) invert(1)";
     icon.style.pointerEvents = "none";
-
     Object.assign(btn.style, {
       padding: "6px",
       border: "none",
       borderRadius: "4px",
       cursor: "pointer",
     });
-
     btn.appendChild(icon);
     btn.onclick = () => {
-      const existingPopup = document.getElementById(POPUP_ID);
-      if (existingPopup) {
-        existingPopup.remove();
+      const existing = document.getElementById(POPUP_ID);
+      if (existing) {
+        existing.remove();
         popupOpen = false;
-        return;
+      } else {
+        createEditor(bar, currentRange);
       }
-      createEditor(bar, currentRange);
     };
-
     bar.prepend(btn);
   }
 
   function showActiveSkip(container, end) {
     if (document.getElementById(ACTIVE_BTN_ID)) return;
-
     const skipBtn = document.createElement("button");
     skipBtn.id = ACTIVE_BTN_ID;
     skipBtn.textContent = "Skip Intro";
-
     const icon = document.createElement("img");
     icon.src = "https://www.svgrepo.com/show/471906/skip-forward.svg";
     icon.alt = "Skip icon";
-    icon.width = 24;
-    icon.height = 24;
+    icon.width = 24; icon.height = 24;
     icon.style.filter = "brightness(0) invert(1)";
     icon.style.pointerEvents = "none";
-
     Object.assign(skipBtn.style, {
       position: "absolute",
       bottom: "130px",
@@ -316,78 +300,55 @@
       alignItems: "center",
       gap: "8px",
     });
-
     skipBtn.prepend(icon);
     skipBtn.onmouseover = () => skipBtn.style.backgroundColor = "#1b192b";
     skipBtn.onmouseout = () => skipBtn.style.backgroundColor = "#0f0d20";
     skipBtn.onclick = (e) => {
       e.preventDefault();
-      if (document.querySelector("video"))
-        document.querySelector("video").currentTime = end;
+      document.querySelector("video").currentTime = end;
       skipBtn.remove();
     };
-
     container.appendChild(skipBtn);
   }
 
   function attachTimeUpdate() {
-  if (!lastVideo) return;
-
-  // clean old listeners
-  if (onTimeUpdate) lastVideo.removeEventListener("timeupdate", onTimeUpdate);
-  if (onSeeked) lastVideo.removeEventListener("seeked", onSeeked);
-
-  const epsilon = 0.1;
-
-  onTimeUpdate = () => {
-    const video = lastVideo;
-    const btn = document.getElementById(ACTIVE_BTN_ID);
-    const inRange =
-      currentRange &&
-      video.currentTime + epsilon >= currentRange.start &&
-      video.currentTime < currentRange.end;
-
-    if (inRange && !btn) showActiveSkip(video.parentElement, currentRange.end);
-    else if ((!inRange || video.currentTime >= currentRange.end) && btn) btn.remove();
-  };
-
-    // this runs right after a seek/rewind/jump completes
-    onSeeked = () => {
-      onTimeUpdate(); // re-evaluate immediately
+    if (!lastVideo) return;
+    if (onTimeUpdate) lastVideo.removeEventListener("timeupdate", onTimeUpdate);
+    if (onSeeked) lastVideo.removeEventListener("seeked", onSeeked);
+    const eps = 0.1;
+    onTimeUpdate = () => {
+      const inRange = currentRange &&
+        lastVideo.currentTime + eps >= currentRange.start &&
+        lastVideo.currentTime < currentRange.end;
+      if (inRange && !document.getElementById(ACTIVE_BTN_ID)) {
+        showActiveSkip(lastVideo.parentElement, currentRange.end);
+      } else if ((!inRange || lastVideo.currentTime >= currentRange.end) &&
+                 document.getElementById(ACTIVE_BTN_ID)) {
+        document.getElementById(ACTIVE_BTN_ID).remove();
+      }
     };
-
+    onSeeked = () => onTimeUpdate();
     lastVideo.addEventListener("timeupdate", onTimeUpdate);
     lastVideo.addEventListener("seeked", onSeeked);
   }
 
-  let lastCheckedEpisodeId = null;
-
-async function onPlay() {
-  const epId = await getEpisodeId();
-
-  // Always refresh if it's a new episode; if it's the same episode, ensure we still have a range.
-  if (epId !== currentEpisodeId) {
-    currentEpisodeId = epId;
-    lastCheckedEpisodeId = epId;
-    currentRange = await fetchRangeWithRetry(epId);
-  } else {
-    // same episode—make sure range is present (could have been lost)
-    if (!currentRange) {
+  async function onPlay() {
+    const epId = await getEpisodeId();
+    if (epId !== currentEpisodeId) {
+      currentEpisodeId = epId;
+      currentRange = await fetchRangeWithRetry(epId);
+    } else if (!currentRange) {
       currentRange = await fetchRangeWithRetry(epId);
     }
+    highlightRangeOnBar();
+    attachTimeUpdate();
   }
-
-  if (lastVideo) attachTimeUpdate();
-}
-
 
   function attachPlayListener() {
     const video = document.querySelector("video");
     if (!video || video === lastVideo) return;
-
     lastVideo?.removeEventListener("play", onPlay);
     if (onTimeUpdate) lastVideo?.removeEventListener("timeupdate", onTimeUpdate);
-
     video.addEventListener("play", onPlay);
     lastVideo = video;
   }
@@ -396,6 +357,7 @@ async function onPlay() {
     const bar = document.querySelector(".control-bar-buttons-menu-container-M6L0_");
     if (bar) addSetupButton(bar);
     attachPlayListener();
+    highlightRangeOnBar();
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
