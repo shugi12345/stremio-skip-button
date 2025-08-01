@@ -27,6 +27,7 @@
    - Go into **Settings** and scroll all the way to the bottom.  
    - Open the **Plugins** folder.  
    - Download `skip-intro.plugin.js` from the **Releases** tab of this GitHub repository and place it into the plugins folder. 📦
+   - don't forget to **enable** it in the settings!
 
 3. **Start watching**  
    Play any episode. If an intro range exists (or after you add one), the skip button will appear during the intro. ▶️
