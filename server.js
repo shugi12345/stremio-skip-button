@@ -76,6 +76,19 @@ app.get("/ranges/:episodeId", async (req, res) => {
   }
 });
 
+// GET /download-db - download a JSON copy of the database
+app.get("/download-db", async (req, res) => {
+  try {
+    const ranges = await SkipRange.find().lean();
+    res.setHeader("Content-Disposition", "attachment; filename=skipranges.json");
+    res.setHeader("Content-Type", "application/json");
+    res.status(200).send(JSON.stringify(ranges, null, 2));
+  } catch (err) {
+    console.error("[Server] Error while downloading the database :", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // HEAD /ranges/:episodeId - check if exists (200 or 204)
 app.head("/ranges/:episodeId", async (req, res) => {
   const { episodeId } = req.params;
