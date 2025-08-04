@@ -10,6 +10,9 @@ const PORT = process.env.PORT || 3000;
 const MONGO_URI =
   process.env.MONGO_URI || "mongodb://localhost:27017/skiprange";
 
+// --- Plugin Version ---
+const PLUGIN_VERSION = "1.1.0"; // Update this when breaking changes are made
+
 // --- Middleware ---
 app.use(cors());
 app.use(express.json()); // parse application/json
@@ -124,6 +127,11 @@ app.delete("/ranges/:episodeId", async (req, res) => {
 
 app.get("/ping", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
+});
+
+// GET /plugin-version - returns current plugin version required by server
+app.get("/plugin-version", (req, res) => {
+  res.json({ version: PLUGIN_VERSION, repo: "https://github.com/shugi12345/stremio-skip-button" });
 });
 
 // --- Start server ---
