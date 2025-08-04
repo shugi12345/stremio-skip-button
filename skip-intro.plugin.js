@@ -8,16 +8,44 @@
 (function () {
   "use strict";
 
-  const SERVER_URL = "https://busy-jacinta-shugi-c2885b2e.koyeb.app";
+  const SERVER_URL = "http://localhost:3000"; // Change to your server URL
+  const PLUGIN_VERSION = "1.1.0"; // Keep in sync with server
   const INLINE_BTN_ID = "skiprange-setup-btn";
   const POPUP_ID = "skiprange-editor";
   const ACTIVE_BTN_ID = "skiprange-active-btn";
+  const UPGRADE_BTN_ID = "skiprange-upgrade-btn";
+  let serverPluginVersion = null;
+  let serverRepoUrl = null;
+  let versionChecked = false;
+  async function fetchServerPluginVersion() {
+    try {
+      const res = await fetch(`${SERVER_URL}/plugin-version`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      serverPluginVersion = json.version;
+      serverRepoUrl = json.repo;
+      return json;
+    } catch (err) {
+      console.error("[SkipIntro] Error fetching server plugin version:", err);
+      return null;
+    }
+  }
+
+  function isBreakingChange(local, remote) {
+    // Compare major version (semantic versioning)
+    if (!local || !remote) return false;
+    const [lMaj] = local.split(".");
+    const [rMaj] = remote.split(".");
+    return lMaj !== rMaj;
+  }
   const MAX_RETRIES = 3;
   const RETRY_DELAY = 2000;
   const STORAGE_PREFIX = "skipintro:";
 
   let currentEpisodeId = null;
+  let currentFileId = null;
   let currentRange = null;
+  let currentOffset = 0;
   let lastVideo = null;
   let onTimeUpdate = null;
   let popupOpen = false;
@@ -71,6 +99,17 @@
     return `${m}:${s}`;
   }
 
+  function simpleHash(str) {
+    let hash = 0, i, chr;
+    if (typeof str !== 'string' || str.length === 0) return 'unknown';
+    for (i = 0; i < str.length; i++) {
+      chr = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + chr;
+      hash |= 0;
+    }
+    return Math.abs(hash).toString();
+  }
+
   async function fetchRangeWithRetry(epId) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       console.log(`[SkipIntro] Fetching /ranges/${epId} (attempt ${attempt})`);
@@ -99,7 +138,7 @@
     return null;
   }
 
-  function highlightRangeOnBar() {
+  async function highlightRangeOnBar() {
     const slider = document.querySelector(".slider-container-nJz5F");
     if (!slider) return;
     let highlight = slider.querySelector(".intro-highlight");
@@ -122,7 +161,7 @@
         slider.insertBefore(highlight, thumbLayer && slider.contains(thumbLayer) ? thumbLayer : slider.firstChild);
       }
       const { duration } = lastVideo;
-      const startPct = (currentRange.start / duration) * 100;
+      const startPct = ((currentRange.start + currentOffset) / duration) * 100;
       const widthPct = ((currentRange.end - currentRange.start) / duration) * 100;
       highlight.style.left = `${startPct}%`;
       highlight.style.width = `${widthPct}%`;
@@ -133,10 +172,41 @@
 
   function createLabeledInput(id, labelText, value, placeholder, marginLeft) {
     const label = document.createElement("label");
-    label.textContent = labelText;
+    label.style.display = "flex";
+    label.style.alignItems = "center";
+
+    // Current Time button
+    const currentBtn = document.createElement("button");
+  currentBtn.type = "button";
+  currentBtn.textContent = "Now";
+    Object.assign(currentBtn.style, {
+      marginRight: "6px",
+      padding: "2px 8px",
+      fontSize: "12px",
+      borderRadius: "4px",
+      border: "none",
+      color: "white",
+      cursor: "pointer",
+      backgroundColor: "#0f0d20",
+      transition: "background-color .3s"
+    });
+    currentBtn.onmouseover = () => currentBtn.style.backgroundColor = "#1b192b";
+    currentBtn.onmouseout = () => currentBtn.style.backgroundColor = "#0f0d20";
+
     const input = document.createElement("input");
     Object.assign(input, { id, value: value || "", placeholder });
     Object.assign(input.style, { width: "50px", color: "white", marginLeft });
+
+    currentBtn.onclick = () => {
+      const video = document.querySelector("video");
+      if (video) {
+        input.value = formatTime(video.currentTime);
+        input.dispatchEvent(new Event("input")); // trigger draft save
+      }
+    };
+
+    label.appendChild(currentBtn);
+    label.appendChild(document.createTextNode(labelText));
     label.appendChild(input);
     return label;
   }
@@ -148,7 +218,7 @@
     const popup = document.createElement("div");
     popup.id = POPUP_ID;
     Object.assign(popup.style, {
-      width: "150px",
+      width: "200px",
       position: "absolute",
       bottom: "120px",
       background: "#0f0d20",
@@ -186,6 +256,8 @@
     startLabel.querySelector("input").addEventListener("input", saveDraft);
     endLabel.querySelector("input").addEventListener("input", saveDraft);
 
+
+    // Save button
     const saveBtn = document.createElement("button");
     Object.assign(saveBtn, { id: "sr-save", textContent: "Save" });
     Object.assign(saveBtn.style, {
@@ -200,6 +272,126 @@
     });
     saveBtn.onmouseover = () => saveBtn.style.backgroundColor = "#1b192b";
     saveBtn.onmouseout = () => saveBtn.style.backgroundColor = "#0f0d20";
+
+    // Offset button
+    const offsetBtn = document.createElement("button");
+    Object.assign(offsetBtn, { id: "sr-offset", textContent: "Offset" });
+    Object.assign(offsetBtn.style, {
+      marginTop: "6px",
+      marginLeft: "8px",
+      padding: "10px 20px",
+      color: "white",
+      cursor: "pointer",
+      backgroundColor: "#0f0d20",
+      border: "none",
+      borderRadius: "6px",
+      transition: "background-color .3s",
+    });
+    offsetBtn.onmouseover = () => offsetBtn.style.backgroundColor = "#1b192b";
+    offsetBtn.onmouseout = () => offsetBtn.style.backgroundColor = "#0f0d20";
+
+    offsetBtn.onclick = async (e) => {
+      e.preventDefault();
+      // Show offset popup
+      if (document.getElementById("sr-offset-popup")) return;
+      const offsetPopup = document.createElement("div");
+      offsetPopup.id = "sr-offset-popup";
+      Object.assign(offsetPopup.style, {
+        position: "fixed",
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        background: "#23204a",
+        color: "#fff",
+        padding: "18px 24px",
+        borderRadius: "8px",
+        zIndex: 99999,
+        fontSize: "18px",
+        display: "flex",
+        alignItems: "center",
+        gap: "12px",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.4)"
+      });
+      const label = document.createElement("span");
+      label.textContent = "Offset (seconds): ";
+      const input = document.createElement("input");
+      input.type = "number";
+      input.style.width = "60px";
+      input.style.marginRight = "8px";
+      input.style.fontSize = "16px";
+      input.style.color = "white";
+      input.style.background = "#23204a";
+      input.style.border = "1px solid #444";
+      input.style.borderRadius = "4px";
+      // Fetch current offset
+      const state = await _eval("window.services.core.transport.getState('player')");
+      const streamUrl = state?.selected?.stream?.url;
+      const fileId = simpleHash(streamUrl);
+        let offsetValue = 0;
+        try {
+          const res = await fetch(`${SERVER_URL}/offsets/${encodeURIComponent(fileId)}`);
+          if (res.ok) {
+            const json = await res.json();
+            offsetValue = json.offset || 0;
+            console.log(`[SkipIntro] Fetched offset for fileId=${fileId}: offset=${offsetValue}`);
+          }
+        } catch {}
+        input.value = offsetValue;
+      const saveOffsetBtn = document.createElement("button");
+      saveOffsetBtn.textContent = "Save Offset";
+      Object.assign(saveOffsetBtn.style, {
+        padding: "6px 12px",
+        color: "white",
+        backgroundColor: "#0f0d20",
+        border: "none",
+        borderRadius: "6px",
+        cursor: "pointer",
+        fontSize: "14px",
+        transition: "background-color .3s"
+      });
+      saveOffsetBtn.onmouseover = () => saveOffsetBtn.style.backgroundColor = "#1b192b";
+      saveOffsetBtn.onmouseout = () => saveOffsetBtn.style.backgroundColor = "#0f0d20";
+      saveOffsetBtn.onclick = async () => {
+        const offsetVal = Number(input.value) || 0;
+        try {
+          await fetch(`${SERVER_URL}/offsets`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileId, offset: offsetVal })
+          });
+          // Fetch offset again after saving
+          const res = await fetch(`${SERVER_URL}/offsets/${encodeURIComponent(fileId)}`);
+          if (res.ok) {
+            const json = await res.json();
+            if (fileId === currentFileId) {
+              currentOffset = json.offset || 0;
+              console.log(`[SkipIntro] Updated global currentOffset for fileId=${fileId}: offset=${currentOffset}`);
+            }
+          }
+        } catch {}
+        offsetPopup.remove();
+        highlightRangeOnBar();
+        attachTimeUpdate();
+      };
+      offsetPopup.append(label, input, saveOffsetBtn);
+      offsetBtn.parentElement.appendChild(offsetPopup);
+      // Remove popup on click outside
+      setTimeout(() => {
+        document.addEventListener("mousedown", function closeOffsetPopup(ev) {
+          if (!offsetPopup.contains(ev.target) && ev.target !== offsetBtn) {
+            offsetPopup.remove();
+            document.removeEventListener("mousedown", closeOffsetPopup);
+          }
+        });
+      }, 0);
+    };
+
+    const btnRow = document.createElement("div");
+    btnRow.style.display = "flex";
+    btnRow.style.flexDirection = "row";
+    btnRow.style.gap = "8px";
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(offsetBtn);
 
     saveBtn.onclick = async (e) => {
       e.preventDefault();
@@ -254,7 +446,7 @@
       }
     });
 
-    popup.append(startLabel, endLabel, saveBtn);
+  popup.append(startLabel, endLabel, btnRow);
     container.appendChild(popup);
   }
 
@@ -288,8 +480,51 @@
     bar.prepend(btn);
   }
 
-  function showActiveSkip(container, end) {
-    if (document.getElementById(ACTIVE_BTN_ID)) return;
+  function showUpgradeButton(container, repoUrl) {
+    if (document.getElementById(UPGRADE_BTN_ID)) return;
+    const upgradeBtn = document.createElement("button");
+    upgradeBtn.id = UPGRADE_BTN_ID;
+    upgradeBtn.textContent = "Upgrade Plugin";
+    const icon = document.createElement("img");
+    icon.src = "https://www.svgrepo.com/show/471906/skip-forward.svg";
+    icon.alt = "Upgrade icon";
+    icon.width = 24; icon.height = 24;
+    icon.style.filter = "brightness(0) invert(1)";
+    icon.style.pointerEvents = "none";
+    Object.assign(upgradeBtn.style, {
+      position: "absolute",
+      bottom: "130px",
+      right: "10vh",
+      padding: "16px",
+      background: "#d32f2f",
+      color: "#fff",
+      border: "none",
+      borderRadius: "6px",
+      cursor: "pointer",
+      fontSize: "24px",
+      zIndex: 1000,
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+    });
+    upgradeBtn.prepend(icon);
+    upgradeBtn.onmouseover = () => upgradeBtn.style.backgroundColor = "#b71c1c";
+    upgradeBtn.onmouseout = () => upgradeBtn.style.backgroundColor = "#d32f2f";
+    upgradeBtn.onclick = (e) => {
+      e.preventDefault();
+      window.open(repoUrl, "_blank");
+    };
+    container.appendChild(upgradeBtn);
+  }
+
+  async function showActiveSkip(container, end) {
+    if (document.getElementById(ACTIVE_BTN_ID) || document.getElementById(UPGRADE_BTN_ID)) return;
+    // If breaking change, show upgrade button
+    if (isBreakingChange(PLUGIN_VERSION, serverPluginVersion)) {
+      showUpgradeButton(container, serverRepoUrl || "https://github.com/shugi12345/stremio-skip-button");
+      return;
+    }
+    // The skip button should use the offset-adjusted end time directly
     const skipBtn = document.createElement("button");
     skipBtn.id = ACTIVE_BTN_ID;
     skipBtn.textContent = "Skip Intro";
@@ -320,7 +555,14 @@
     skipBtn.onmouseout = () => skipBtn.style.backgroundColor = "#0f0d20";
     skipBtn.onclick = (e) => {
       e.preventDefault();
-      document.querySelector("video").currentTime = end;
+      const video = document.querySelector("video");
+      const targetTime = end; // end is already offset-adjusted
+      if (video) {
+        video.currentTime = targetTime;
+        console.log(`[SkipIntro] Skipping intro: targetTime=${targetTime}`);
+      } else {
+        console.warn("[SkipIntro] No video element found to apply offset.");
+      }
       skipBtn.remove();
     };
     container.appendChild(skipBtn);
@@ -331,13 +573,16 @@
     if (onTimeUpdate) lastVideo.removeEventListener("timeupdate", onTimeUpdate);
     if (onSeeked) lastVideo.removeEventListener("seeked", onSeeked);
     const eps = 0.1;
-    onTimeUpdate = () => {
+    onTimeUpdate = async () => {
+      // Use offset-adjusted intro range for skip button detection
+      const introStart = currentRange ? currentRange.start + currentOffset : 0;
+      const introEnd = currentRange ? currentRange.end + currentOffset : 0;
       const inRange = currentRange &&
-        lastVideo.currentTime + eps >= currentRange.start &&
-        lastVideo.currentTime < currentRange.end;
+        lastVideo.currentTime + eps >= introStart &&
+        lastVideo.currentTime < introEnd;
       if (inRange && !document.getElementById(ACTIVE_BTN_ID)) {
-        showActiveSkip(lastVideo.parentElement, currentRange.end);
-      } else if ((!inRange || lastVideo.currentTime >= currentRange.end) &&
+        await showActiveSkip(lastVideo.parentElement, introEnd);
+      } else if ((!inRange || lastVideo.currentTime >= introEnd) &&
                  document.getElementById(ACTIVE_BTN_ID)) {
         document.getElementById(ACTIVE_BTN_ID).remove();
       }
@@ -348,7 +593,32 @@
   }
 
   async function onPlay() {
+    // Check server plugin version once
+    if (!versionChecked) {
+      await fetchServerPluginVersion();
+      versionChecked = true;
+    }
     const epId = await getEpisodeId();
+    const { meta } = await getPlayerState();
+    const state = await _eval("window.services.core.transport.getState('player')");
+    const streamUrl = state?.selected?.stream?.url;
+    const fileId = simpleHash(streamUrl);
+    // If file changes, update offset
+    if (fileId !== currentFileId) {
+      currentFileId = fileId;
+      try {
+        const res = await fetch(`${SERVER_URL}/offsets/${encodeURIComponent(fileId)}`);
+        if (res.ok) {
+          const json = await res.json();
+          currentOffset = json.offset || 0;
+        } else {
+          currentOffset = 0;
+        }
+      } catch {
+        currentOffset = 0;
+      }
+    }
+    // If episode changes, update range
     if (epId !== currentEpisodeId) {
       currentEpisodeId = epId;
       currentRange = await fetchRangeWithRetry(epId);

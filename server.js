@@ -14,17 +14,65 @@ const MONGO_URI =
 app.use(cors());
 app.use(express.json()); // parse application/json
 
-// --- Mongoose model ---
+// --- Mongoose models ---
 const skipRangeSchema = new mongoose.Schema(
   {
     episodeId: { type: String, required: true, unique: true },
     start: { type: Number, required: true },
     end: { type: Number, required: true },
-    title: { type: String }, // NEW FIELD
+    title: { type: String },
   },
   { timestamps: true }
 );
 const SkipRange = mongoose.model("SkipRange", skipRangeSchema);
+
+// Offset per episode file
+const offsetSchema = new mongoose.Schema(
+  {
+    fileId: { type: String, required: true, unique: true }, // unique file identifier
+    offset: { type: Number, required: true },
+  },
+  { timestamps: true }
+);
+const Offset = mongoose.model("Offset", offsetSchema);
+// POST /offsets - set offset for a file
+
+app.post("/offsets", async (req, res) => {
+  const { fileId, offset } = req.body;
+  if (!fileId || typeof offset !== "number") {
+    console.log(`[Server] Invalid offset POST: fileId=${fileId}, offset=${offset}`);
+    return res.status(400).json({ error: "fileId and offset are required" });
+  }
+  try {
+    const result = await Offset.findOneAndUpdate(
+      { fileId },
+      { offset },
+      { upsert: true, new: true, runValidators: true }
+    );
+    console.log(`[Server] Saved offset for fileId=${fileId}: offset=${offset}`);
+    return res.json(result);
+  } catch (err) {
+    console.error("[Server] Error saving offset:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
+});
+
+// GET /offsets/:fileId - get offset for a file
+app.get("/offsets/:fileId", async (req, res) => {
+  const { fileId } = req.params;
+  try {
+    const result = await Offset.findOne({ fileId });
+    if (!result) {
+      console.log(`[Server] No offset for fileId=${fileId}, returning 0`);
+      return res.json({ offset: 0 });
+    }
+    console.log(`[Server] Fetched offset for fileId=${fileId}: offset=${result.offset}`);
+    return res.json({ offset: result.offset });
+  } catch (err) {
+    console.error("[Server] Error fetching offset:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
+});
 
 // --- Routes ---
 
