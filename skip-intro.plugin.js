@@ -9,9 +9,35 @@
   "use strict";
 
   const SERVER_URL = "https://busy-jacinta-shugi-c2885b2e.koyeb.app";
+  const PLUGIN_VERSION = "1.1.0"; // Keep in sync with server
   const INLINE_BTN_ID = "skiprange-setup-btn";
   const POPUP_ID = "skiprange-editor";
   const ACTIVE_BTN_ID = "skiprange-active-btn";
+  const UPGRADE_BTN_ID = "skiprange-upgrade-btn";
+  let serverPluginVersion = null;
+  let serverRepoUrl = null;
+  let versionChecked = false;
+  async function fetchServerPluginVersion() {
+    try {
+      const res = await fetch(`${SERVER_URL}/plugin-version`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      serverPluginVersion = json.version;
+      serverRepoUrl = json.repo;
+      return json;
+    } catch (err) {
+      console.error("[SkipIntro] Error fetching server plugin version:", err);
+      return null;
+    }
+  }
+
+  function isBreakingChange(local, remote) {
+    // Compare major version (semantic versioning)
+    if (!local || !remote) return false;
+    const [lMaj] = local.split(".");
+    const [rMaj] = remote.split(".");
+    return lMaj !== rMaj;
+  }
   const MAX_RETRIES = 3;
   const RETRY_DELAY = 2000;
   const STORAGE_PREFIX = "skipintro:";
@@ -133,10 +159,41 @@
 
   function createLabeledInput(id, labelText, value, placeholder, marginLeft) {
     const label = document.createElement("label");
-    label.textContent = labelText;
+    label.style.display = "flex";
+    label.style.alignItems = "center";
+
+    // Current Time button
+    const currentBtn = document.createElement("button");
+  currentBtn.type = "button";
+  currentBtn.textContent = "Now";
+    Object.assign(currentBtn.style, {
+      marginRight: "6px",
+      padding: "2px 8px",
+      fontSize: "12px",
+      borderRadius: "4px",
+      border: "none",
+      color: "white",
+      cursor: "pointer",
+      backgroundColor: "#0f0d20",
+      transition: "background-color .3s"
+    });
+    currentBtn.onmouseover = () => currentBtn.style.backgroundColor = "#1b192b";
+    currentBtn.onmouseout = () => currentBtn.style.backgroundColor = "#0f0d20";
+
     const input = document.createElement("input");
     Object.assign(input, { id, value: value || "", placeholder });
     Object.assign(input.style, { width: "50px", color: "white", marginLeft });
+
+    currentBtn.onclick = () => {
+      const video = document.querySelector("video");
+      if (video) {
+        input.value = formatTime(video.currentTime);
+        input.dispatchEvent(new Event("input")); // trigger draft save
+      }
+    };
+
+    label.appendChild(currentBtn);
+    label.appendChild(document.createTextNode(labelText));
     label.appendChild(input);
     return label;
   }
@@ -148,7 +205,7 @@
     const popup = document.createElement("div");
     popup.id = POPUP_ID;
     Object.assign(popup.style, {
-      width: "150px",
+      width: "180px",
       position: "absolute",
       bottom: "120px",
       background: "#0f0d20",
@@ -288,8 +345,50 @@
     bar.prepend(btn);
   }
 
+  function showUpgradeButton(container, repoUrl) {
+    if (document.getElementById(UPGRADE_BTN_ID)) return;
+    const upgradeBtn = document.createElement("button");
+    upgradeBtn.id = UPGRADE_BTN_ID;
+    upgradeBtn.textContent = "Upgrade Plugin";
+    const icon = document.createElement("img");
+    icon.src = "https://www.svgrepo.com/show/471906/skip-forward.svg";
+    icon.alt = "Upgrade icon";
+    icon.width = 24; icon.height = 24;
+    icon.style.filter = "brightness(0) invert(1)";
+    icon.style.pointerEvents = "none";
+    Object.assign(upgradeBtn.style, {
+      position: "absolute",
+      bottom: "130px",
+      right: "10vh",
+      padding: "16px",
+      background: "#d32f2f",
+      color: "#fff",
+      border: "none",
+      borderRadius: "6px",
+      cursor: "pointer",
+      fontSize: "24px",
+      zIndex: 1000,
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+    });
+    upgradeBtn.prepend(icon);
+    upgradeBtn.onmouseover = () => upgradeBtn.style.backgroundColor = "#b71c1c";
+    upgradeBtn.onmouseout = () => upgradeBtn.style.backgroundColor = "#d32f2f";
+    upgradeBtn.onclick = (e) => {
+      e.preventDefault();
+      window.open(repoUrl, "_blank");
+    };
+    container.appendChild(upgradeBtn);
+  }
+
   function showActiveSkip(container, end) {
-    if (document.getElementById(ACTIVE_BTN_ID)) return;
+    if (document.getElementById(ACTIVE_BTN_ID) || document.getElementById(UPGRADE_BTN_ID)) return;
+    // If breaking change, show upgrade button
+    if (isBreakingChange(PLUGIN_VERSION, serverPluginVersion)) {
+      showUpgradeButton(container, serverRepoUrl || "https://github.com/shugi12345/stremio-skip-button");
+      return;
+    }
     const skipBtn = document.createElement("button");
     skipBtn.id = ACTIVE_BTN_ID;
     skipBtn.textContent = "Skip Intro";
@@ -348,6 +447,11 @@
   }
 
   async function onPlay() {
+    // Check server plugin version once
+    if (!versionChecked) {
+      await fetchServerPluginVersion();
+      versionChecked = true;
+    }
     const epId = await getEpisodeId();
     if (epId !== currentEpisodeId) {
       currentEpisodeId = epId;
