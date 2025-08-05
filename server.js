@@ -26,37 +26,6 @@ const skipRangeSchema = new mongoose.Schema(
 );
 const SkipRange = mongoose.model("SkipRange", skipRangeSchema);
 
-// Offset per episode file
-const offsetSchema = new mongoose.Schema(
-  {
-    fileId: { type: String, required: true, unique: true }, // unique file identifier
-    offset: { type: Number, required: true },
-  },
-  { timestamps: true }
-);
-const Offset = mongoose.model("Offset", offsetSchema);
-// POST /offsets - set offset for a file
-
-app.post("/offsets", async (req, res) => {
-  const { fileId, offset } = req.body;
-  if (!fileId || typeof offset !== "number") {
-    console.log(`[Server] Invalid offset POST: fileId=${fileId}, offset=${offset}`);
-    return res.status(400).json({ error: "fileId and offset are required" });
-  }
-  try {
-    const result = await Offset.findOneAndUpdate(
-      { fileId },
-      { offset },
-      { upsert: true, new: true, runValidators: true }
-    );
-    console.log(`[Server] Saved offset for fileId=${fileId}: offset=${offset}`);
-    return res.json(result);
-  } catch (err) {
-    console.error("[Server] Error saving offset:", err);
-    return res.status(500).json({ error: "Database error" });
-  }
-});
-
 // GET /offsets/:fileId - get offset for a file
 app.get("/offsets/:fileId", async (req, res) => {
   const { fileId } = req.params;
@@ -78,24 +47,24 @@ app.get("/offsets/:fileId", async (req, res) => {
 
 // POST /ranges - create or update skip range
 app.post("/ranges", async (req, res) => {
-  const { episodeId, start, end, title } = req.body;
-  if (!episodeId || typeof start !== "number" || typeof end !== "number") {
+  const { episodeId, start, end, offset, title } = req.body;
+  if (!episodeId || typeof start !== "number" || typeof end !== "number" || typeof offset !== "number") {
     console.log(
-      `[Server] Invalid POST body: episodeId=${episodeId}, start=${start}, end=${end}`
+      `[Server] Invalid POST body: episodeId=${episodeId}, start=${start}, end=${end}, offset=${offset}, title=${title}`
     );
     return res
       .status(400)
-      .json({ error: "episodeId, start and end are required" });
+      .json({ error: "episodeId, start, end and offset are required" });
   }
 
   try {
     const range = await SkipRange.findOneAndUpdate(
       { episodeId },
-      { start, end, title },
+      { start, end, offset, title },
       { upsert: true, new: true, runValidators: true }
     );
     console.log(
-      `[Server] Saved range for ${episodeId} (${title}): start=${start}, end=${end}`
+      `[Server] Saved range for ${episodeId} (${title}): start=${start}, end=${end}, offset=${offset}`
     );
     return res.json(range);
   } catch (err) {
@@ -115,7 +84,7 @@ app.get("/ranges/:episodeId", async (req, res) => {
       return res.sendStatus(204);
     }
     console.log(
-      `[Server] Fetched range for ${episodeId} (${range.title}): start=${range.start}, end=${range.end}`
+      `[Server] Fetched range for ${episodeId} (${range.title}): start=${range.start}, end=${range.end}, offset=${range.offset}`
     );
     return res.status(200).json(range);
   } catch (err) {
