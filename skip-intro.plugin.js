@@ -10,7 +10,7 @@
 
   const SERVER_URL = "http://localhost:3000"; // Change to your server URL
   const PLUGIN_VERSION = "1.1.0"; // Keep in sync with server
-  const REPO_URL = "https://github.com/shugi12345/stremio-enhanced";
+  const REPO_URL = "https://github.com/shugi12345/stremio-skip-button";
   const INLINE_BTN_ID = "skiprange-setup-btn";
   const POPUP_ID = "skiprange-editor";
   const ACTIVE_BTN_ID = "skiprange-active-btn";
@@ -35,6 +35,10 @@
   async function onPlay() {
     video = document.querySelector("video");
     serverPluginVersion = await fetchServerPluginVersion();
+    if (updateVerCheck(PLUGIN_VERSION, serverPluginVersion) === "BREAKING") {
+      showUpgradeButton(video.parentElement, REPO_URL);
+      return;
+    }
     episodeId = await getEpisodeId();
     fileId = await simpleHash();
     title = await getTitle();
@@ -271,7 +275,7 @@
       top: "50%",
       left: "50%",
       transform: "translate(-50%, -50%)",
-      background: "#23204a",
+      background: "#0f0d20",
       color: "#fff",
       padding: "18px 24px",
       borderRadius: "8px",
@@ -287,16 +291,41 @@
     const label = document.createElement("span");
     label.textContent = "Offset (seconds): ";
 
+    // Now button for offset
+    const nowOffsetBtn = document.createElement("button");
+    nowOffsetBtn.type = "button";
+    nowOffsetBtn.textContent = "Now";
+    Object.assign(nowOffsetBtn.style, {
+      padding: "6px 12px",
+      fontSize: "14px",
+      color: "white",
+      backgroundColor: "#0f0d20",
+      border: "none",
+      borderRadius: "4px",
+      cursor: "pointer",
+      transition: "background-color .3s"
+    });
+    nowOffsetBtn.onmouseover = () => nowOffsetBtn.style.backgroundColor = "#1b192b";
+    nowOffsetBtn.onmouseout = () => nowOffsetBtn.style.backgroundColor = "#0f0d20";
+    nowOffsetBtn.onclick = () => {
+      if (video != null && typeof start === 'number') {
+        const relativeOffset = Math.floor(video.currentTime - start);
+        input.value = relativeOffset;
+        input.dispatchEvent(new Event('input'));
+      }
+    };
+
     // Input
     const input = document.createElement("input");
     input.type = "number";
+    input.step = "0.5";
     input.value = offset || 0;
     Object.assign(input.style, {
       width: "60px",
       marginRight: "8px",
       fontSize: "16px",
       color: "white",
-      background: "#23204a",
+      background: "#0f0d20",
       border: "1px solid #444",
       borderRadius: "4px"
     });
@@ -318,13 +347,13 @@
     saveOffsetBtn.onmouseout = () => saveOffsetBtn.style.backgroundColor = "#0f0d20";
 
     saveOffsetBtn.onclick = async () => {
-      // Grab the latest user entry here
       const newOffset = Number(input.value) || 0;
       await sendData(start, end, newOffset);
       offsetPopup.remove();
     };
 
-    offsetPopup.append(label, input, saveOffsetBtn);
+    // Assemble popup
+    offsetPopup.append(nowOffsetBtn, label, input, saveOffsetBtn);
     document.body.appendChild(offsetPopup);
 
     // Close when clicking outside
@@ -337,6 +366,7 @@
       });
     }, 0);
   }
+
   function nowButton(id, labelText, value, placeholder, marginLeft) {
     const label = document.createElement("label");
     label.style.display = "flex";
@@ -407,13 +437,8 @@
       highlight.remove();
     }
   }
-  async function showSkipButton(container) {
+  async function showSkipButton() {
     if (document.getElementById(ACTIVE_BTN_ID) || document.getElementById(UPGRADE_BTN_ID)) return;
-    // If breaking change, show upgrade button
-    if (isBreakingChange(PLUGIN_VERSION, serverPluginVersion)) {
-      showUpgradeButton(container, REPO_URL);
-      return;
-    }
     const skipBtn = document.createElement("button");
     skipBtn.id = ACTIVE_BTN_ID;
     skipBtn.textContent = "Skip Intro";
@@ -452,9 +477,9 @@
       }
       skipBtn.remove();
     };
-    container.appendChild(skipBtn);
+    video.parentElement.appendChild(skipBtn);
   }
-  function showUpgradeButton(container) {
+  function showUpgradeButton() {
     if (document.getElementById(UPGRADE_BTN_ID)) return;
     const upgradeBtn = document.createElement("button");
     upgradeBtn.id = UPGRADE_BTN_ID;
@@ -488,26 +513,31 @@
       e.preventDefault();
       window.open(REPO_URL, "_blank");
     };
-    container.appendChild(upgradeBtn);
+    video.parentElement.appendChild(upgradeBtn);
   }
   async function fetchServerPluginVersion() {
     try {
       const res = await fetch(`${SERVER_URL}/plugin-version`);
       if (!res.ok) return null;
       const json = await res.json();
-      serverPluginVersion = json.version;
       return json.version;
     } catch (err) {
       console.error("[SkipIntro] Error fetching server plugin version:", err);
       return null;
     }
   }
-  function isBreakingChange(local, remote) {
+  async function updateVerCheck(local, remote) {
     // Compare major version (semantic versioning)
+    console.log(`[SkipIntro] Checking plugin versions: local=${local}, remote=${remote}`);
     if (!local || !remote) return false;
-    const [lMaj] = local.split(".");
-    const [rMaj] = remote.split(".");
-    return lMaj !== rMaj;
+    const [lMaj,lMin,lPatch] = local.split(".");
+    const [rMaj,rMin,rPatch] = remote.split(".");
+    if (lMaj !== rMaj) return "BREAKING"; // Major version change is breaking
+    if ((lMin !== rMin || lPatch !== rPatch) && !localStorage.getItem("updateReminder")) {
+      alert("[SkipIntro] Plugin update available: " + remote + " (current: " + local + ")\nPlease update using the following link: " + REPO_URL);
+      localStorage.setItem("updateReminder", "true");
+      return "MINOR"; // Minor version change is non-breaking
+    }
   }
   async function getTitle() {
     const { seriesInfo, meta } = await getPlayerState();
@@ -594,3 +624,7 @@
 
   observer.observe(document.body, { childList: true, subtree: true });
 })();
+
+window.addEventListener("beforeunload", () => {
+  localStorage.removeItem("updateReminder");
+});

@@ -6,7 +6,7 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/skiprange";
-const CurrentVersion = "1.1.0";
+const CurrentVersion = "1.1.1";
 
 app.use(cors());
 app.use(express.json());
@@ -90,7 +90,7 @@ app.get("/ranges/:episodeId", async (req, res) => {
 });
 
 app.get("/plugin-version", (req, res) => {
-  res.json({ version: CurrentVersion });
+   res.json({ version: CurrentVersion });
 });
 
 app.get("/download-db", async (req, res) => {
