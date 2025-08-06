@@ -10,7 +10,7 @@
 
   const SERVER_URL = "http://localhost:3000"; // Change to your server URL
   const PLUGIN_VERSION = "1.1.0"; // Keep in sync with server
-  const REPO_URL = "https://github.com/shugi12345/stremio-skip-button";
+  const REPO_URL = "https://github.com/shugi12345/stremio-skip-button/releases";
   const INLINE_BTN_ID = "skiprange-setup-btn";
   const POPUP_ID = "skiprange-editor";
   const ACTIVE_BTN_ID = "skiprange-active-btn";
@@ -35,8 +35,7 @@
   async function onPlay() {
     video = document.querySelector("video");
     serverPluginVersion = await fetchServerPluginVersion();
-    if (updateVerCheck(PLUGIN_VERSION, serverPluginVersion) === "BREAKING") {
-      showUpgradeButton(video.parentElement, REPO_URL);
+    if (await updateVerCheck(PLUGIN_VERSION, serverPluginVersion) === "BREAKING") {
       return;
     }
     episodeId = await getEpisodeId();
@@ -54,6 +53,8 @@
         const quaryParams = new URLSearchParams({ fileId, title });
         const res = await fetch(`${SERVER_URL}/ranges/${encodeURIComponent(episodeId)}?${quaryParams}`);
         if (res.status === 204) {
+          start = 0;
+          end = 0;
           console.log(`[SkipIntro] No skip data for episode ${episodeId} (${res.status})`);
           return null;
         }
@@ -148,17 +149,27 @@
   async function popupEditor(iconBar) {
     if (document.getElementById(POPUP_ID) || popupOpen) return;
     popupOpen = true;
+    const numKeyBlocker = e => {
+      if (!/^[0-9]$/.test(e.key)) 
+        return;
+      if ( e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)
+        return; 
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    document.addEventListener("keydown", numKeyBlocker, { capture: true });
 
     const popup = document.createElement("div");
     popup.id = POPUP_ID;
     Object.assign(popup.style, {
-      width: "200px",
+      width: "calc(220px + 1vw)",
       position: "absolute",
       bottom: "120px",
       background: "#0f0d20",
       color: "#fff",
       padding: "10px",
-      borderRadius: "6px",
+      borderRadius: "8px",
       zIndex: 9999,
       fontSize: "16px",
       display: "flex",
@@ -187,30 +198,54 @@
       color: "white",
       cursor: "pointer",
       backgroundColor: "#0f0d20",
-      border: "none",
-      borderRadius: "6px",
+      border:         "2px solid #1b192b",
+      borderRadius:   "8px",
       transition: "background-color .3s",
     });
     saveBtn.onmouseover = () => saveBtn.style.backgroundColor = "#1b192b";
     saveBtn.onmouseout = () => saveBtn.style.backgroundColor = "#0f0d20";
+
     saveBtn.onclick = async (e) => {
-      e.preventDefault();
-      const newStart = parseTime(document.getElementById("sr-start").value);
-      const newEnd   = parseTime(document.getElementById("sr-end").value);
-      if (!(newEnd > newStart)) {
-        return alert("End must be greater than Start");
-      }
-      if (newStart === start && newEnd === end) {
+    e.preventDefault();
+
+    const newStart = parseTime(document.getElementById("sr-start").value);
+    const newEnd   = parseTime(document.getElementById("sr-end").value);
+
+    if (!(newEnd > newStart)) {
+      return Swal.fire({
+        icon: "error",
+        title: "Invalid range",
+        text: "End time must be greater than start time."
+      });
+    }
+    if(start === 0 && end ===0){
+        await sendData(newStart, newEnd, offset);
         popup.remove();
         popupOpen = false;
-        return;
-      }
-      await sendData(newStart, newEnd, offset);
-      popup.remove();
-      popupOpen = false;
-    };
+    }
+    else{
+      const result = await Swal.fire({
+        title: "Are you sure?",
+        html: `
+          Editing the intro will change it for everyone else.<br>
+          If there’s a delay, please adjust the offset option.
+        `,
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonText: "Yes, save it",
+        cancelButtonText: "Cancel",
+        reverseButtons: true
+      });
 
-    // Offset button now just triggers showOffsetPopup()
+      if (result.isConfirmed) {
+        await sendData(newStart, newEnd, offset);
+        popup.remove();
+        popupOpen = false;
+      }
+    }
+  };
+
+    // Offset button
     const offsetBtn = document.createElement("button");
     Object.assign(offsetBtn, { id: "sr-offset", textContent: "Offset" });
     Object.assign(offsetBtn.style, {
@@ -220,8 +255,8 @@
       color: "white",
       cursor: "pointer",
       backgroundColor: "#0f0d20",
-      border: "none",
-      borderRadius: "6px",
+      border:         "2px solid #1b192b",
+      borderRadius:   "8px",
       transition: "background-color .3s",
     });
     offsetBtn.onmouseover = () => offsetBtn.style.backgroundColor = "#1b192b";
@@ -245,6 +280,7 @@
       if (!popup.contains(e.target) && e.target.id !== INLINE_BTN_ID) {
         tempStart = parseTime(document.getElementById("sr-start").value);
         tempEnd   = parseTime(document.getElementById("sr-end").value);
+        document.removeEventListener("keydown", numKeyBlocker, { capture: true });
         popup.remove();
         popupOpen = false;
         document.removeEventListener("click", closePopup);
@@ -254,6 +290,7 @@
       if (e.key === "Escape") {
         tempStart = parseTime(document.getElementById("sr-start").value);
         tempEnd   = parseTime(document.getElementById("sr-end").value);
+        document.removeEventListener("keydown", numKeyBlocker, { capture: true });
         popup.remove();
         popupOpen = false;
         document.removeEventListener("keydown", escClose);
@@ -264,10 +301,9 @@
     iconBar.appendChild(popup);
   }
   async function showOffsetPopup() {
-    // Prevent duplicates
     if (document.getElementById("sr-offset-popup")) return;
-
-    // Create popup container
+    
+    // Create offset popup
     const offsetPopup = document.createElement("div");
     offsetPopup.id = "sr-offset-popup";
     Object.assign(offsetPopup.style, {
@@ -287,11 +323,9 @@
       boxShadow: "0 4px 24px rgba(0,0,0,0.4)"
     });
 
-    // Label
     const label = document.createElement("span");
     label.textContent = "Offset (seconds): ";
-
-    // Now button for offset
+    // now field for offset
     const nowOffsetBtn = document.createElement("button");
     nowOffsetBtn.type = "button";
     nowOffsetBtn.textContent = "Now";
@@ -300,8 +334,8 @@
       fontSize: "14px",
       color: "white",
       backgroundColor: "#0f0d20",
-      border: "none",
-      borderRadius: "4px",
+      border:         "2px solid #1b192b",
+      borderRadius:   "8px",
       cursor: "pointer",
       transition: "background-color .3s"
     });
@@ -315,10 +349,10 @@
       }
     };
 
-    // Input
+    // Input field for offset
     const input = document.createElement("input");
     input.type = "number";
-    input.step = "0.5";
+    input.step = "0.25";
     input.value = offset || 0;
     Object.assign(input.style, {
       width: "60px",
@@ -326,8 +360,8 @@
       fontSize: "16px",
       color: "white",
       background: "#0f0d20",
-      border: "1px solid #444",
-      borderRadius: "4px"
+      border:         "2px solid #1b192b",
+      borderRadius:   "8px",
     });
 
     // Save‐offset button
@@ -337,8 +371,8 @@
       padding: "6px 12px",
       color: "white",
       backgroundColor: "#0f0d20",
-      border: "none",
-      borderRadius: "6px",
+      border:         "2px solid #1b192b",
+      borderRadius:   "8px",
       cursor: "pointer",
       fontSize: "14px",
       transition: "background-color .3s"
@@ -366,46 +400,61 @@
       });
     }, 0);
   }
-
   function nowButton(id, labelText, value, placeholder, marginLeft) {
-    const label = document.createElement("label");
-    label.style.display = "flex";
-    label.style.alignItems = "center";
+    const container = document.createElement("div");
+    container.style.display = "flex";
+    container.style.alignItems = "center";
 
-    // Current Time button
-    const currentBtn = document.createElement("button");
-  currentBtn.type = "button";
-  currentBtn.textContent = "Now";
-    Object.assign(currentBtn.style, {
-      marginRight: "6px",
-      padding: "2px 8px",
-      fontSize: "12px",
-      borderRadius: "4px",
-      border: "none",
-      color: "white",
-      cursor: "pointer",
-      backgroundColor: "#0f0d20",
-      transition: "background-color .3s"
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Now";
+    Object.assign(btn.style, {
+        cursor: "pointer",
+        width:          "50px",           // wide enough for “00:00”
+        height:         "28px",           // fixed box height
+        margin:        "0px 4px",          // no vertical padding needed now
+        fontSize:       "14px",           // legible size
+        //lineHeight:     "28px",           // exactly equal to height for vertical centering
+        textAlign:      "center",         // horizontal centering
+        boxSizing:      "border-box",     // include padding/border in width/height
+        color:          "white",
+        backgroundColor:"#0f0d20",
+        border:         "2px solid #1b192b",
+        borderRadius:   "8px"
     });
-    currentBtn.onmouseover = () => currentBtn.style.backgroundColor = "#1b192b";
-    currentBtn.onmouseout = () => currentBtn.style.backgroundColor = "#0f0d20";
+    btn.onmouseover = () => btn.style.backgroundColor = "#1b192b";
+    btn.onmouseout  = () => btn.style.backgroundColor = "#0f0d20";
+    btn.onclick = () => {
+      if (video) {
+        input.value = formatTime(video.currentTime);
+        input.dispatchEvent(new Event("input"));
+      }
+    };
+    const text = document.createElement("span");
+    text.textContent = labelText;
+    Object.assign(text.style, { marginRight: "4px", color: "white" });
 
     const input = document.createElement("input");
     Object.assign(input, { id, value: value || "", placeholder });
-    Object.assign(input.style, { width: "50px", color: "white", marginLeft });
+    Object.assign(input.style, {
+      width:          "70px",           // wide enough for “00:00”
+      height:         "28px",           // fixed box height
+      margin:        "4px 0px",          // no vertical padding needed now
+      fontSize:       "14px",           // legible size
+      lineHeight:     "28px",           // exactly equal to height for vertical centering
+      textAlign:      "center",         // horizontal centering
+      boxSizing:      "border-box",     // include padding/border in width/height
+      color:          "white",
+      backgroundColor:"#0f0d20",
+      border:         "2px solid #1b192b",
+      borderRadius:   "8px",
+      marginLeft
+    });
 
-    currentBtn.onclick = () => {
-      if (video) {
-        input.value = formatTime(video.currentTime);
-        input.dispatchEvent(new Event("input")); // trigger draft save
-      }
-    };
-
-    label.appendChild(currentBtn);
-    label.appendChild(document.createTextNode(labelText));
-    label.appendChild(input);
-    return label;
+    container.append(btn, text, input);
+    return container;
   }
+
   async function highlightRangeOnBar() {
     const slider = document.querySelector(".slider-container-nJz5F");
     if (!slider) return;
@@ -479,42 +528,6 @@
     };
     video.parentElement.appendChild(skipBtn);
   }
-  function showUpgradeButton() {
-    if (document.getElementById(UPGRADE_BTN_ID)) return;
-    const upgradeBtn = document.createElement("button");
-    upgradeBtn.id = UPGRADE_BTN_ID;
-    upgradeBtn.textContent = "Upgrade Plugin";
-    const icon = document.createElement("img");
-    icon.src = "https://www.svgrepo.com/show/471906/skip-forward.svg";
-    icon.alt = "Upgrade icon";
-    icon.width = 24; icon.height = 24;
-    icon.style.filter = "brightness(0) invert(1)";
-    icon.style.pointerEvents = "none";
-    Object.assign(upgradeBtn.style, {
-      position: "absolute",
-      bottom: "130px",
-      right: "10vh",
-      padding: "16px",
-      background: "#d32f2f",
-      color: "#fff",
-      border: "none",
-      borderRadius: "6px",
-      cursor: "pointer",
-      fontSize: "24px",
-      zIndex: 1000,
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
-    });
-    upgradeBtn.prepend(icon);
-    upgradeBtn.onmouseover = () => upgradeBtn.style.backgroundColor = "#b71c1c";
-    upgradeBtn.onmouseout = () => upgradeBtn.style.backgroundColor = "#d32f2f";
-    upgradeBtn.onclick = (e) => {
-      e.preventDefault();
-      window.open(REPO_URL, "_blank");
-    };
-    video.parentElement.appendChild(upgradeBtn);
-  }
   async function fetchServerPluginVersion() {
     try {
       const res = await fetch(`${SERVER_URL}/plugin-version`);
@@ -527,16 +540,40 @@
     }
   }
   async function updateVerCheck(local, remote) {
-    // Compare major version (semantic versioning)
     console.log(`[SkipIntro] Checking plugin versions: local=${local}, remote=${remote}`);
     if (!local || !remote) return false;
     const [lMaj,lMin,lPatch] = local.split(".");
     const [rMaj,rMin,rPatch] = remote.split(".");
-    if (lMaj !== rMaj) return "BREAKING"; // Major version change is breaking
+    if (lMaj !== rMaj){
+      video.addEventListener("loadeddata", () => video.pause(), { once: true });
+      Swal.fire({
+        title: "Plugin Update Required.",
+        html: `
+          Version <strong>${remote}</strong> is out!<br/>
+          Please update here:
+          <a href="${REPO_URL}" target="_blank">GitHub ↗</a>
+        `,
+        icon: "error",
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        confirmButtonText: "Exit"
+      }).then((result) => {
+        if (result.isConfirmed) {
+          window.history.back();
+        }
+      });
+      return "BREAKING";
+    }
     if ((lMin !== rMin || lPatch !== rPatch) && !localStorage.getItem("updateReminder")) {
-      alert("[SkipIntro] Plugin update available: " + remote + " (current: " + local + ")\nPlease update using the following link: " + REPO_URL);
+      video.addEventListener("loadeddata", () => video.pause(), { once: true });
+      Swal.fire({
+        title: "Plugin Update Available!",
+        html: `Version <strong>${remote}</strong> is out!<br>
+              Please update here: 
+              <a href="${REPO_URL}" target="_blank">GitHub ↗</a>`,
+        icon: "info"
+      });
       localStorage.setItem("updateReminder", "true");
-      return "MINOR"; // Minor version change is non-breaking
     }
   }
   async function getTitle() {
@@ -609,10 +646,8 @@
   }
   function attachEpisodeListener() {
     const newVideo = document.querySelector("video");
-    // If it’s the same video element we’ve already wired up, skip
     if (!newVideo || newVideo === video) return;
     video = newVideo;
-    // Fire onPlay once when a new source/episode is ready
     video.addEventListener("loadedmetadata", onPlay);
   }
   const observer = new MutationObserver(() => {
@@ -625,6 +660,19 @@
   observer.observe(document.body, { childList: true, subtree: true });
 })();
 
+//import SweetAlert2 module
+const _swalReady = (function loadSwal() {
+  return new Promise((resolve, reject) => {
+    if (window.Swal) return resolve(window.Swal);
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/sweetalert2@11";
+    s.onload  = () => resolve(window.Swal);
+    s.onerror = () => reject(new Error("Failed to load SweetAlert2"));
+    document.head.appendChild(s);
+  });
+})();
+
+//delete localStorage items before closing app
 window.addEventListener("beforeunload", () => {
   localStorage.removeItem("updateReminder");
 });

@@ -6,7 +6,7 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/skiprange";
-const CurrentVersion = "1.1.1";
+const CurrentVersion = "1.1.0";
 
 app.use(cors());
 app.use(express.json());
