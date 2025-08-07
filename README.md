@@ -1,6 +1,6 @@
 # 🚀 Unofficial Intro Skip Plugin for Stremio Enhanced
 
-**Version:** 1.2.0
+**Version:** 1.1.0
 **Author:** shugi12345
 
 > 🌍 Community-powered “Skip Intro” for shows and movies in **Stremio Enhanced**.
