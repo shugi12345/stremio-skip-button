@@ -8,7 +8,7 @@
 (function () {
   "use strict";
 
-  const SERVER_URL = "https://busy-jacinta-shugi-c2885b2e.koyeb.app/"; // Change to your server URL
+  const SERVER_URL = "https://busy-jacinta-shugi-c2885b2e.koyeb.app"; // Change to your server URL
   const PLUGIN_VERSION = "1.1.0"; // Keep in sync with server
   const REPO_URL = "https://github.com/shugi12345/stremio-skip-button/releases";
   const INLINE_BTN_ID = "skiprange-setup-btn";
