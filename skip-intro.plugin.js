@@ -8,7 +8,7 @@
 (function () {
   "use strict";
 
-  const SERVER_URL = "http://localhost:3000"; // Change to your server URL
+  const SERVER_URL = "https://busy-jacinta-shugi-c2885b2e.koyeb.app/"; // Change to your server URL
   const PLUGIN_VERSION = "1.1.0"; // Keep in sync with server
   const REPO_URL = "https://github.com/shugi12345/stremio-skip-button/releases";
   const INLINE_BTN_ID = "skiprange-setup-btn";
@@ -278,8 +278,10 @@
     // Close handlers
     document.addEventListener("click", function closePopup(e) {
       if (!popup.contains(e.target) && e.target.id !== INLINE_BTN_ID) {
-        tempStart = parseTime(document.getElementById("sr-start").value);
-        tempEnd   = parseTime(document.getElementById("sr-end").value);
+        if(tempStart === null || tempEnd === null) {
+          tempStart = parseTime(document.getElementById("sr-start").value);
+          tempEnd   = parseTime(document.getElementById("sr-end").value);
+        }
         document.removeEventListener("keydown", numKeyBlocker, { capture: true });
         popup.remove();
         popupOpen = false;
