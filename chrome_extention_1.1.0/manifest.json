@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Stremio Enhanced: Skip Intro",
+  "description": "Adds Skip Intro controls and ranges for shows/movies in Stremio Enhanced.",
+  "version": "1.1.0",
+  "host_permissions": [
+    "https://busy-jacinta-shugi-c2885b2e.koyeb.app/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "content/libs/sweetalert2.all.min.js",
+        "content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["storage", "scripting"],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/libs/sweetalert2.all.min.js",
+        "content/page-bridge.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "action": {
+    "default_title": "Skip Intro"
+  }
+}
